@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import Sidebar from "@/components/Sidebar";
+import { AuthProvider } from '@/context/AuthContext';
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   // Use localStorage to persist dark mode preference
@@ -111,7 +112,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
         {/* Main content */}
         <main className="flex-1 max-w-7xl w-full mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          {children}
+          <AuthProvider>{children}</AuthProvider>
         </main>
 
         {/* Footer */}

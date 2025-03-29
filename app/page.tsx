@@ -24,11 +24,11 @@ export default function WelcomePage() {
             
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-4">
-              <Link href="/dashboard" className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400">
+              <Link href="/about" className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400">
                 About
               </Link>
-              <Link href="/courses" className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400">
-                Courses
+              <Link href="/catalog" className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400">
+                Catalogue
               </Link>
               <Link href="/contact" className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400">
                 Contact
@@ -76,8 +76,8 @@ export default function WelcomePage() {
             <Link href="/about" className="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-md">
               About
             </Link>
-            <Link href="/courses" className="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-md">
-              Courses
+            <Link href="/catalog" className="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-md">
+              Catalogue
             </Link>
             <Link href="/contact" className="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-md">
               Contact
@@ -106,8 +106,8 @@ export default function WelcomePage() {
             <Link href="/signup" className="px-6 py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 transition duration-200">
               Get Started
             </Link>
-            <Link href="/courses" className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-200">
-              Browse Courses
+            <Link href="/catalog" className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition duration-200">
+              Browse catalogs
             </Link>
           </div>
           
@@ -132,7 +132,7 @@ export default function WelcomePage() {
         <div className="w-full md:w-1/2">
           <div className="relative rounded-lg overflow-hidden shadow-xl">
             <img 
-              src="/chill.jpg" 
+              src="/image/globe.jpg" 
               alt="Students learning online" 
               className="w-full h-auto object-cover"
             />

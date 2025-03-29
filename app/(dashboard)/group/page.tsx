@@ -8,7 +8,8 @@ import {
   Edit2, 
   Trash2, 
   Search,
-  Send
+  Send,
+  X
 } from 'lucide-react';
 
 // Interfaces for data structures
@@ -102,11 +103,71 @@ const CourseGroupManagementPage: React.FC = () => {
   const [selectedForum, setSelectedForum] = useState<ChatForum | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Modal states
+  const [showNewGroupModal, setShowNewGroupModal] = useState(false);
+  const [showNewForumModal, setShowNewForumModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupDescription, setNewGroupDescription] = useState('');
+  const [newForumTitle, setNewForumTitle] = useState('');
+  const [newForumDescription, setNewForumDescription] = useState('');
 
   // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedForum?.messages]);
+
+  const handleCreateNewGroup = () => {
+    if (!newGroupName.trim()) return;
+    
+    const newGroup: CourseGroup = {
+      id: Math.max(...groups.map(g => g.id)) + 1,
+      name: newGroupName,
+      description: newGroupDescription,
+      members: [],
+      chatForums: [],
+      assignments: []
+    };
+    
+    setGroups([...groups, newGroup]);
+    setNewGroupName('');
+    setNewGroupDescription('');
+    setShowNewGroupModal(false);
+    setSelectedGroup(newGroup);
+  };
+
+  const handleCreateNewForum = () => {
+    if (!selectedGroup || !newForumTitle.trim()) return;
+
+    const newForum: ChatForum = {
+      id: Math.max(...selectedGroup.chatForums.map(f => f.id), 0) + 1,
+      title: newForumTitle,
+      description: newForumDescription,
+      memberCount: selectedGroup.members.length,
+      lastMessageAt: new Date(),
+      messages: []
+    };
+
+    const updatedGroups = groups.map(group => {
+      if (group.id === selectedGroup.id) {
+        return {
+          ...group,
+          chatForums: [...group.chatForums, newForum]
+        };
+      }
+      return group;
+    });
+
+    setGroups(updatedGroups);
+    setSelectedGroup({
+      ...selectedGroup,
+      chatForums: [...selectedGroup.chatForums, newForum]
+    });
+    setNewForumTitle('');
+    setNewForumDescription('');
+    setShowNewForumModal(false);
+    setSelectedForum(newForum);
+  };
 
   const renderMembersList = () => {
     if (!selectedGroup) return null;
@@ -115,12 +176,12 @@ const CourseGroupManagementPage: React.FC = () => {
       <div className="bg-white shadow-md rounded-lg">
         <div className="flex justify-between items-center p-4 border-b">
           <h3 className="text-xl font-semibold flex items-center">
-            <Users className="mr-2 text-blue-600" /> Members 
+            <Users className="mr-2 text-blue-800" /> Members 
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.members.length}
             </span>
           </h3>
-          <button className="btn-primary flex items-center">
+          <button className="btn-primary text-blue-800 flex items-center">
             <Plus className="mr-2" /> Add Member
           </button>
         </div>
@@ -212,6 +273,24 @@ const CourseGroupManagementPage: React.FC = () => {
       });
 
       setGroups(updatedGroups);
+      
+      // Update selected forum with new message
+      if (selectedForum && selectedForum.id === forumId) {
+        setSelectedForum({
+          ...selectedForum,
+          messages: [
+            ...selectedForum.messages,
+            {
+              id: selectedForum.messages.length + 1,
+              senderId: 1,
+              content: newMessage,
+              timestamp: new Date()
+            }
+          ],
+          lastMessageAt: new Date()
+        });
+      }
+      
       setNewMessage('');
     };
 
@@ -219,12 +298,15 @@ const CourseGroupManagementPage: React.FC = () => {
       <div className="bg-white shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
         <div className="flex justify-between items-center p-4 border-b">
           <h3 className="text-xl font-semibold flex items-center">
-            <MessageCircle className="mr-2 text-purple-600" /> Chat Forums
-            <span className="ml-2 bg-purple-100 text-purple-800 px-2 rounded-full text-sm">
+            <MessageCircle className="mr-2 text-blue-600" /> Chat Forums
+            <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.chatForums.length}
             </span>
           </h3>
-          <button className="btn-primary flex items-center">
+          <button 
+            className="btn-primary text-blue-800 flex items-center"
+            onClick={() => setShowNewForumModal(true)}
+          >
             <Plus className="mr-2" /> Create Forum
           </button>
         </div>
@@ -233,11 +315,11 @@ const CourseGroupManagementPage: React.FC = () => {
           <div className="flex-1 flex flex-col">
             {/* Forum Header */}
             <div className="p-4 bg-gray-50 border-b">
-              <h4 className="font-semibold text-lg">{selectedForum.title}</h4>
+              <h4 className="font-semibold text-blue-800 text-lg">{selectedForum.title}</h4>
               <p className="text-sm text-gray-600">{selectedForum.description}</p>
               <button
                 onClick={() => setSelectedForum(null)}
-                className="text-sm text-purple-600 hover:underline mt-1"
+                className="text-sm text-blue-600 hover:underline mt-1"
               >
                 Back to Forums
               </button>
@@ -255,7 +337,7 @@ const CourseGroupManagementPage: React.FC = () => {
                   <div
                     className={`max-w-[70%] p-3 rounded-lg ${
                       message.senderId === 1
-                        ? 'bg-purple-100 text-purple-900'
+                        ? 'bg-blue-100 text-black'
                         : 'bg-gray-100 text-gray-900'
                     }`}
                   >
@@ -283,15 +365,15 @@ const CourseGroupManagementPage: React.FC = () => {
             </div>
 
             {/* Message Input */}
-            <div className="p-4 border-t bg-gray-50">
-              <div className="flex items-center gap-2">
+            <div className="p-4 border-t bg-white">
+              <div className="flex text-blue-800 items-center gap-2">
                 <input
                   type="text"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && sendMessage(selectedForum.id)}
                   placeholder="Type a message..."
-                  className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
                   onClick={() => sendMessage(selectedForum.id)}
@@ -339,8 +421,8 @@ const CourseGroupManagementPage: React.FC = () => {
       <div className="bg-white shadow-md rounded-lg">
         <div className="flex justify-between items-center p-4 border-b">
           <h3 className="text-xl font-semibold flex items-center">
-            <FileText className="mr-2 text-green-600" /> Assignments
-            <span className="ml-2 bg-green-100 text-green-800 px-2 rounded-full text-sm">
+            <FileText className="mr-2 text-blue-600" /> Assignments
+            <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.assignments.length}
             </span>
           </h3>
@@ -377,15 +459,122 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   };
 
+  // Modal for creating a new group
+  const renderNewGroupModal = () => {
+    return (
+      <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${showNewGroupModal ? 'block' : 'hidden'}`}>
+        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-semibold">Create New Course Group</h3>
+            <button onClick={() => setShowNewGroupModal(false)} className="text-gray-500 hover:text-gray-700">
+              <X size={24} />
+            </button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Group Name</label>
+              <input
+                type="text"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter group name"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={newGroupDescription}
+                onChange={(e) => setNewGroupDescription(e.target.value)}
+                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter group description"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end space-x-3 mt-4">
+              <button
+                onClick={() => setShowNewGroupModal(false)}
+                className="px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateNewGroup}
+                className="btn-primary"
+              >
+                Create Group
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Modal for creating a new forum
+  const renderNewForumModal = () => {
+    return (
+      <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${showNewForumModal ? 'block' : 'hidden'}`}>
+        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-semibold">Create New Chat Forum</h3>
+            <button onClick={() => setShowNewForumModal(false)} className="text-gray-500 hover:text-gray-700">
+              <X size={24} />
+            </button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Forum Title</label>
+              <input
+                type="text"
+                value={newForumTitle}
+                onChange={(e) => setNewForumTitle(e.target.value)}
+                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter forum title"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={newForumDescription}
+                onChange={(e) => setNewForumDescription(e.target.value)}
+                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter forum description"
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end space-x-3 mt-4">
+              <button
+                onClick={() => setShowNewForumModal(false)}
+                className="px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateNewForum}
+                className="btn-primary"
+              >
+                Create Forum
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Groups Sidebar */}
         <div className="bg-white shadow-md rounded-lg">
           <div className="p-4 border-b flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Course Groups</h2>
-            <button className="btn-primary flex items-center">
-              <Plus className="mr-2" /> New Group
+            <h2 className="text-2xl text-blue-800 font-bold">Course Groups</h2>
+            <button 
+              className="bg-blue-500 text-white font-bold py-2 px-4 rounded flex items-center"
+              onClick={() => setShowNewGroupModal(true)}
+            >
+              <Plus className="mr-2 " /> New Group
             </button>
           </div>
           <div className="divide-y max-h-[calc(100vh-150px)] overflow-y-auto">
@@ -444,6 +633,10 @@ const CourseGroupManagementPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Modals */}
+      {renderNewGroupModal()}
+      {renderNewForumModal()}
 
       {/* CSS for btn-primary */}
       <style jsx>{`
