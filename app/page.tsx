@@ -172,6 +172,9 @@ export default function WelcomePage() {
               <Link href="/help" className="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
                 Help
               </Link>
+              <Link href="/signin" className="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
+                Admin
+              </Link>
             </div>
           </div>
         </div>

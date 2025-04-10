@@ -5,8 +5,6 @@ import {
   MessageCircle, 
   FileText, 
   Plus, 
-  Edit2, 
-  Trash2, 
   Search,
   Send,
   X
@@ -175,15 +173,12 @@ const CourseGroupManagementPage: React.FC = () => {
     return (
       <div className="bg-white shadow-md rounded-lg">
         <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-xl font-semibold flex items-center">
+          <h3 className="text-xl text-gray-500 font-semibold flex items-center">
             <Users className="mr-2 text-blue-800" /> Members 
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.members.length}
             </span>
           </h3>
-          <button className="btn-primary text-blue-800 flex items-center">
-            <Plus className="mr-2" /> Add Member
-          </button>
         </div>
         <div className="p-4">
           <div className="flex mb-4">
@@ -191,16 +186,16 @@ const CourseGroupManagementPage: React.FC = () => {
               <input 
                 type="text" 
                 placeholder="Search members..." 
-                className="w-full pl-10 pr-4 py-2 border rounded-lg"
+                className="w-full text-black pl-10 pr-4 py-2 border rounded-lg"
               />
-              <Search className="absolute left-3 top-3 text-gray-400" />
+              <Search className="absolute left-3 top-3 text-black" />
             </div>
           </div>
           <div className="space-y-4">
             {selectedGroup.members.map(member => (
               <div 
                 key={member.id} 
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                className="flex items-center justify-between p-3 bg-gray-100 rounded-lg"
               >
                 <div className="flex items-center">
                   <img 
@@ -209,7 +204,7 @@ const CourseGroupManagementPage: React.FC = () => {
                     className="w-10 h-10 rounded-full mr-4"
                   />
                   <div>
-                    <div className="font-semibold">{member.name}</div>
+                    <div className="font-semibold text-black">{member.name}</div>
                     <div className="text-sm text-gray-500">{member.email}</div>
                     <div 
                       className={`
@@ -223,14 +218,7 @@ const CourseGroupManagementPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <div className="flex space-x-2">
-                  <button className="text-blue-600 hover:bg-blue-100 p-2 rounded">
-                    <Edit2 size={18} />
-                  </button>
-                  <button className="text-red-600 hover:bg-red-100 p-2 rounded">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
+                
               </div>
             ))}
           </div>
@@ -297,18 +285,13 @@ const CourseGroupManagementPage: React.FC = () => {
     return (
       <div className="bg-white shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
         <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-xl font-semibold flex items-center">
+          <h3 className="text-xl text-gray-500 font-semibold flex items-center">
             <MessageCircle className="mr-2 text-blue-600" /> Chat Forums
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.chatForums.length}
             </span>
           </h3>
-          <button 
-            className="btn-primary text-blue-800 flex items-center"
-            onClick={() => setShowNewForumModal(true)}
-          >
-            <Plus className="mr-2" /> Create Forum
-          </button>
+         
         </div>
 
         {selectedForum ? (
@@ -389,12 +372,12 @@ const CourseGroupManagementPage: React.FC = () => {
             {selectedGroup.chatForums.map(forum => (
               <div 
                 key={forum.id} 
-                className="border rounded-lg p-4 hover:bg-gray-50 transition cursor-pointer"
+                className="border rounded-lg p-4 hover:bg-gray-300 transition cursor-pointer"
                 onClick={() => setSelectedForum(forum)}
               >
                 <div className="flex justify-between items-center">
                   <div>
-                    <h4 className="font-semibold text-lg">{forum.title}</h4>
+                    <h4 className="font-semibold text-gray-600 text-lg">{forum.title}</h4>
                     <p className="text-gray-600 text-sm">{forum.description}</p>
                   </div>
                   <div className="flex items-center space-x-4">
@@ -420,15 +403,13 @@ const CourseGroupManagementPage: React.FC = () => {
     return (
       <div className="bg-white shadow-md rounded-lg">
         <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-xl font-semibold flex items-center">
+          <h3 className="text-xl text-gray-500 font-semibold flex items-center">
             <FileText className="mr-2 text-blue-600" /> Assignments
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.assignments.length}
             </span>
           </h3>
-          <button className="btn-primary flex items-center">
-            <Plus className="mr-2" /> Create Assignment
-          </button>
+          
         </div>
         <div className="p-4 space-y-4">
           {selectedGroup.assignments.map(assignment => (
@@ -437,7 +418,7 @@ const CourseGroupManagementPage: React.FC = () => {
               className="border rounded-lg p-4 hover:bg-gray-50 transition flex justify-between items-center"
             >
               <div>
-                <h4 className="font-semibold text-lg">{assignment.title}</h4>
+                <h4 className="font-semibold text-gray-800 text-lg">{assignment.title}</h4>
                 <div 
                   className={`
                     text-xs px-2 py-1 rounded-full inline-block mt-2
@@ -459,110 +440,6 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   };
 
-  // Modal for creating a new group
-  const renderNewGroupModal = () => {
-    return (
-      <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${showNewGroupModal ? 'block' : 'hidden'}`}>
-        <div className="bg-white rounded-lg p-6 w-full max-w-md">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-semibold">Create New Course Group</h3>
-            <button onClick={() => setShowNewGroupModal(false)} className="text-gray-500 hover:text-gray-700">
-              <X size={24} />
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Group Name</label>
-              <input
-                type="text"
-                value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
-                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter group name"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea
-                value={newGroupDescription}
-                onChange={(e) => setNewGroupDescription(e.target.value)}
-                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter group description"
-                rows={3}
-              />
-            </div>
-            <div className="flex justify-end space-x-3 mt-4">
-              <button
-                onClick={() => setShowNewGroupModal(false)}
-                className="px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateNewGroup}
-                className="btn-primary"
-              >
-                Create Group
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Modal for creating a new forum
-  const renderNewForumModal = () => {
-    return (
-      <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${showNewForumModal ? 'block' : 'hidden'}`}>
-        <div className="bg-white rounded-lg p-6 w-full max-w-md">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-semibold">Create New Chat Forum</h3>
-            <button onClick={() => setShowNewForumModal(false)} className="text-gray-500 hover:text-gray-700">
-              <X size={24} />
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Forum Title</label>
-              <input
-                type="text"
-                value={newForumTitle}
-                onChange={(e) => setNewForumTitle(e.target.value)}
-                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter forum title"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea
-                value={newForumDescription}
-                onChange={(e) => setNewForumDescription(e.target.value)}
-                className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter forum description"
-                rows={3}
-              />
-            </div>
-            <div className="flex justify-end space-x-3 mt-4">
-              <button
-                onClick={() => setShowNewForumModal(false)}
-                className="px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateNewForum}
-                className="btn-primary"
-              >
-                Create Forum
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -570,12 +447,7 @@ const CourseGroupManagementPage: React.FC = () => {
         <div className="bg-white shadow-md rounded-lg">
           <div className="p-4 border-b flex justify-between items-center">
             <h2 className="text-2xl text-blue-800 font-bold">Course Groups</h2>
-            <button 
-              className="bg-blue-500 text-white font-bold py-2 px-4 rounded flex items-center"
-              onClick={() => setShowNewGroupModal(true)}
-            >
-              <Plus className="mr-2 " /> New Group
-            </button>
+            
           </div>
           <div className="divide-y max-h-[calc(100vh-150px)] overflow-y-auto">
             {groups.map(group => (
@@ -587,7 +459,7 @@ const CourseGroupManagementPage: React.FC = () => {
                 `}
                 onClick={() => setSelectedGroup(group)}
               >
-                <h3 className="font-semibold">{group.name}</h3>
+                <h3 className="font-semibold text-gray-800">{group.name}</h3>
                 <p className="text-sm text-gray-600">{group.description}</p>
               </div>
             ))}
@@ -634,21 +506,19 @@ const CourseGroupManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Modals */}
-      {renderNewGroupModal()}
-      {renderNewForumModal()}
+    
 
       {/* CSS for btn-primary */}
       <style jsx>{`
         .btn-primary {
-          background: linear-gradient(to right, #8b5cf6, #6d28d9);
+          background: linear-gradient(to right,rgb(28, 31, 202),rgb(43, 40, 217));
           color: white;
           border-radius: 0.5rem;
           padding: 0.5rem 1rem;
           transition: all 0.2s ease;
         }
         .btn-primary:hover {
-          background: linear-gradient(to right, #7c3aed, #5b21b6);
+          background: linear-gradient(to right,rgb(58, 76, 237),rgb(33, 35, 182));
           transform: translateY(-1px);
         }
       `}</style>

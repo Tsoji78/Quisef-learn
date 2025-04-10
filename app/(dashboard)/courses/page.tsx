@@ -105,7 +105,7 @@ export default function CoursesPage() {
         </h1>
         
         {/* Category Filter */}
-        <div className="flex space-x-2">
+        <div className="flex-1 space-x-4 space-y-4">
           {categories.map((category) => (
             <button
               key={category}

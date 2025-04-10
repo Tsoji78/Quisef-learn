@@ -24,9 +24,9 @@ export default function Dashboard() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg">
-        <h3 className="text-lg font-medium text-gray-800 dark:text-white">Students</h3>
+        <h3 className="text-lg font-medium text-gray-800 dark:text-white">Courses</h3>
         <p className="text-3xl font-bold text-green-600 dark:text-green-400 mt-2">245</p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Total Enrolled</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Available</p>
       </div>
 
       {/* Recent Activity */}

@@ -101,12 +101,32 @@ const CourseGroupManagementPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'members' | 'forums' | 'assignments'>('members');
   const [selectedForum, setSelectedForum] = useState<ChatForum | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  const [showNewGroupForm, setShowNewGroupForm] = useState(false);
+  const [newGroupData, setNewGroupData] = useState({ name: '', description: '' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedForum?.messages]);
+
+  const addNewGroup = () => {
+    if (!newGroupData.name) return;
+    
+    const newGroup: CourseGroup = {
+      id: groups.length + 1,
+      name: newGroupData.name,
+      description: newGroupData.description,
+      members: [],
+      chatForums: [],
+      assignments: []
+    };
+    
+    setGroups([...groups, newGroup]);
+    setNewGroupData({ name: '', description: '' });
+    setShowNewGroupForm(false);
+    setSelectedGroup(newGroup);
+  };
 
   const renderMembersList = () => {
     if (!selectedGroup) return null;
@@ -139,7 +159,7 @@ const CourseGroupManagementPage: React.FC = () => {
             {selectedGroup.members.map(member => (
               <div 
                 key={member.id} 
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                className="flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 transition rounded-lg cursor-pointer"
               >
                 <div className="flex items-center">
                   <img 
@@ -163,10 +183,10 @@ const CourseGroupManagementPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex space-x-2">
-                  <button className="text-blue-600 hover:bg-blue-100 p-2 rounded">
+                  <button className="text-blue-600 hover:bg-blue-200 p-2 rounded-full transition">
                     <Edit2 size={18} />
                   </button>
-                  <button className="text-red-600 hover:bg-red-100 p-2 rounded">
+                  <button className="text-red-600 hover:bg-red-100 p-2 rounded-full transition">
                     <Trash2 size={18} />
                   </button>
                 </div>
@@ -219,8 +239,8 @@ const CourseGroupManagementPage: React.FC = () => {
       <div className="bg-white shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
         <div className="flex justify-between items-center p-4 border-b">
           <h3 className="text-xl font-semibold flex items-center">
-            <MessageCircle className="mr-2 text-purple-600" /> Chat Forums
-            <span className="ml-2 bg-purple-100 text-purple-800 px-2 rounded-full text-sm">
+            <MessageCircle className="mr-2 text-blue-600" /> Chat Forums
+            <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.chatForums.length}
             </span>
           </h3>
@@ -232,12 +252,12 @@ const CourseGroupManagementPage: React.FC = () => {
         {selectedForum ? (
           <div className="flex-1 flex flex-col">
             {/* Forum Header */}
-            <div className="p-4 bg-gray-50 border-b">
+            <div className="p-4 bg-blue-50 border-b">
               <h4 className="font-semibold text-lg">{selectedForum.title}</h4>
               <p className="text-sm text-gray-600">{selectedForum.description}</p>
               <button
                 onClick={() => setSelectedForum(null)}
-                className="text-sm text-purple-600 hover:underline mt-1"
+                className="text-sm text-blue-600 hover:underline mt-1"
               >
                 Back to Forums
               </button>
@@ -255,7 +275,7 @@ const CourseGroupManagementPage: React.FC = () => {
                   <div
                     className={`max-w-[70%] p-3 rounded-lg ${
                       message.senderId === 1
-                        ? 'bg-purple-100 text-purple-900'
+                        ? 'bg-blue-100 text-blue-900'
                         : 'bg-gray-100 text-gray-900'
                     }`}
                   >
@@ -283,7 +303,7 @@ const CourseGroupManagementPage: React.FC = () => {
             </div>
 
             {/* Message Input */}
-            <div className="p-4 border-t bg-gray-50">
+            <div className="p-4 border-t bg-blue-50">
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -291,7 +311,7 @@ const CourseGroupManagementPage: React.FC = () => {
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && sendMessage(selectedForum.id)}
                   placeholder="Type a message..."
-                  className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
                   onClick={() => sendMessage(selectedForum.id)}
@@ -307,7 +327,7 @@ const CourseGroupManagementPage: React.FC = () => {
             {selectedGroup.chatForums.map(forum => (
               <div 
                 key={forum.id} 
-                className="border rounded-lg p-4 hover:bg-gray-50 transition cursor-pointer"
+                className="border rounded-lg p-4 bg-blue-50 hover:bg-blue-100 transition cursor-pointer"
                 onClick={() => setSelectedForum(forum)}
               >
                 <div className="flex justify-between items-center">
@@ -339,8 +359,8 @@ const CourseGroupManagementPage: React.FC = () => {
       <div className="bg-white shadow-md rounded-lg">
         <div className="flex justify-between items-center p-4 border-b">
           <h3 className="text-xl font-semibold flex items-center">
-            <FileText className="mr-2 text-green-600" /> Assignments
-            <span className="ml-2 bg-green-100 text-green-800 px-2 rounded-full text-sm">
+            <FileText className="mr-2 text-blue-600" /> Assignments
+            <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.assignments.length}
             </span>
           </h3>
@@ -352,7 +372,7 @@ const CourseGroupManagementPage: React.FC = () => {
           {selectedGroup.assignments.map(assignment => (
             <div 
               key={assignment.id} 
-              className="border rounded-lg p-4 hover:bg-gray-50 transition flex justify-between items-center"
+              className="border rounded-lg p-4 bg-blue-50 hover:bg-blue-100 transition cursor-pointer flex justify-between items-center"
             >
               <div>
                 <h4 className="font-semibold text-lg">{assignment.title}</h4>
@@ -377,32 +397,96 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   };
 
+  const renderNewGroupForm = () => {
+    return (
+      <div className="p-4 bg-blue-50 border-t">
+        <h3 className="font-medium mb-2">Create New Group</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Group Name *
+            </label>
+            <input
+              type="text"
+              value={newGroupData.name}
+              onChange={(e) => setNewGroupData({...newGroupData, name: e.target.value})}
+              placeholder="Enter group name"
+              className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
+            <textarea
+              value={newGroupData.description}
+              onChange={(e) => setNewGroupData({...newGroupData, description: e.target.value})}
+              placeholder="Enter group description"
+              className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={2}
+            />
+          </div>
+          <div className="flex justify-end space-x-2 pt-2">
+            <button 
+              onClick={() => setShowNewGroupForm(false)}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition"
+            >
+              Cancel
+            </button>
+            <button 
+              onClick={addNewGroup}
+              className="btn-primary"
+              disabled={!newGroupData.name}
+            >
+              Create Group
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Groups Sidebar */}
-        <div className="bg-white shadow-md rounded-lg">
+        <div className="bg-white shadow-md rounded-lg flex flex-col">
           <div className="p-4 border-b flex justify-between items-center">
             <h2 className="text-2xl font-bold">Course Groups</h2>
-            <button className="btn-primary flex items-center">
+            <button 
+              className="btn-primary flex items-center"
+              onClick={() => setShowNewGroupForm(!showNewGroupForm)}
+            >
               <Plus className="mr-2" /> New Group
             </button>
           </div>
-          <div className="divide-y max-h-[calc(100vh-150px)] overflow-y-auto">
+          <div className="divide-y overflow-y-auto flex-grow">
             {groups.map(group => (
               <div 
                 key={group.id} 
                 className={`
-                  p-4 cursor-pointer hover:bg-gray-50 transition
-                  ${selectedGroup?.id === group.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''}
+                  p-4 cursor-pointer hover:bg-blue-50 transition
+                  ${selectedGroup?.id === group.id ? 'bg-blue-100 border-l-4 border-blue-500' : ''}
                 `}
-                onClick={() => setSelectedGroup(group)}
+                onClick={() => {
+                  setSelectedGroup(group);
+                  setSelectedForum(null);
+                }}
               >
                 <h3 className="font-semibold">{group.name}</h3>
                 <p className="text-sm text-gray-600">{group.description}</p>
+                <div className="flex space-x-2 mt-2">
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                    {group.members.length} members
+                  </span>
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                    {group.assignments.length} assignments
+                  </span>
+                </div>
               </div>
             ))}
           </div>
+          {showNewGroupForm && renderNewGroupForm()}
         </div>
 
         {/* Group Details */}
@@ -420,10 +504,10 @@ const CourseGroupManagementPage: React.FC = () => {
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key as any)}
                     className={`
-                      flex-1 flex items-center justify-center py-3 
+                      flex-1 flex items-center justify-center py-3 transition
                       ${activeTab === tab.key 
                         ? 'bg-blue-500 text-white' 
-                        : 'text-gray-600 hover:bg-gray-100'}
+                        : 'text-gray-600 hover:bg-blue-100'}
                     `}
                   >
                     <tab.icon className="mr-2" />
@@ -439,7 +523,14 @@ const CourseGroupManagementPage: React.FC = () => {
             </>
           ) : (
             <div className="bg-white p-8 rounded-lg shadow-md text-center">
-              <p className="text-gray-600">Select a group to view details</p>
+              <h3 className="text-xl font-semibold mb-4">Welcome to Course Group Management</h3>
+              <p className="text-gray-600 mb-6">Select an existing group or create a new one to get started</p>
+              <button
+                onClick={() => setShowNewGroupForm(true)}
+                className="btn-primary flex items-center mx-auto"
+              >
+                <Plus className="mr-2" /> Create Your First Group
+              </button>
             </div>
           )}
         </div>
@@ -448,14 +539,14 @@ const CourseGroupManagementPage: React.FC = () => {
       {/* CSS for btn-primary */}
       <style jsx>{`
         .btn-primary {
-          background: linear-gradient(to right, #8b5cf6, #6d28d9);
+          background: linear-gradient(to right, #3b82f6, #2563eb);
           color: white;
           border-radius: 0.5rem;
           padding: 0.5rem 1rem;
           transition: all 0.2s ease;
         }
         .btn-primary:hover {
-          background: linear-gradient(to right, #7c3aed, #5b21b6);
+          background: linear-gradient(to right, #2563eb, #1d4ed8);
           transform: translateY(-1px);
         }
       `}</style>

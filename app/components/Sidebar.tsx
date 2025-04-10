@@ -31,7 +31,7 @@ export default function Sidebar({ isOpen, setIsOpen, darkMode }: SidebarProps) {
   const navItems = [
     { name: "Home", path: "/home", icon: "🏠" },
     { name: "Courses", path: "/courses", icon: "📚" },
-    { name: "Class Sessions", path: "/class", icon: "👥" },
+    { name: "Class Schedules", path: "/class", icon: "👥" },
     { name: "Groups", path: "/group", icon: "📊" },
     { name: "Certificates", path: "/certificate", icon: "⚙️" },
   ];

@@ -25,14 +25,14 @@ export default function Sidebar({ isOpen, setIsOpen, darkMode }: SidebarProps) {
 
   const handleLogout = async () => {
     // Note: Implement your auth logic here
-    router.push("/login");
+    router.push("/signin");
   };
 
   const navItems = [
     { name: "Home", path: "/homePage", icon: "🏠" },
-    { name: "Courses", path: "/courses", icon: "📚" },
+    { name: "Courses", path: "/modules", icon: "📚" },
     { name: "Class Sessions", path: "/sessions", icon: "👥" },
-    { name: "Groups", path: "/groups", icon: "📊" },
+    { name: "Groups", path: "/member", icon: "📊" },
     { name: "Certificates", path: "/certificates", icon: "⚙️" },
   ];
 
