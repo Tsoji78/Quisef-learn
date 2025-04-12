@@ -237,7 +237,7 @@ const CourseGroupManagementPage: React.FC = () => {
 
     return (
       <div className="bg-white shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b">
+        <div className="flex justify-between text-black items-center p-4 border-b">
           <h3 className="text-xl font-semibold flex items-center">
             <MessageCircle className="mr-2 text-blue-600" /> Chat Forums
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
@@ -253,8 +253,8 @@ const CourseGroupManagementPage: React.FC = () => {
           <div className="flex-1 flex flex-col">
             {/* Forum Header */}
             <div className="p-4 bg-blue-50 border-b">
-              <h4 className="font-semibold text-lg">{selectedForum.title}</h4>
-              <p className="text-sm text-gray-600">{selectedForum.description}</p>
+              <h4 className="font-semibold text-blue-200 text-lg">{selectedForum.title}</h4>
+              <p className="text-sm text-blue-500">{selectedForum.description}</p>
               <button
                 onClick={() => setSelectedForum(null)}
                 className="text-sm text-blue-600 hover:underline mt-1"
@@ -276,7 +276,7 @@ const CourseGroupManagementPage: React.FC = () => {
                     className={`max-w-[70%] p-3 rounded-lg ${
                       message.senderId === 1
                         ? 'bg-blue-100 text-blue-900'
-                        : 'bg-gray-100 text-gray-900'
+                        : 'bg-gray-100 text-black'
                     }`}
                   >
                     <div className="flex items-center gap-2">
@@ -293,7 +293,7 @@ const CourseGroupManagementPage: React.FC = () => {
                       </span>
                     </div>
                     <p className="mt-1">{message.content}</p>
-                    <span className="text-xs text-gray-500 block mt-1">
+                    <span className="text-xs text-black block mt-1">
                       {message.timestamp.toLocaleTimeString()}
                     </span>
                   </div>
@@ -311,10 +311,9 @@ const CourseGroupManagementPage: React.FC = () => {
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && sendMessage(selectedForum.id)}
                   placeholder="Type a message..."
-                  className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 p-2 border text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <button
-                  onClick={() => sendMessage(selectedForum.id)}
+                <button                  onClick={() => sendMessage(selectedForum.id)}
                   className="btn-primary p-2"
                 >
                   <Send size={18} />

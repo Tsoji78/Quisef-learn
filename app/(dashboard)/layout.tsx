@@ -1,16 +1,20 @@
-
-// dasboard/layout.tsx
+// dashboard/layout.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import Sidebar from "@/components/Sidebar";
-import { AuthProvider } from '@/context/AuthContext';
+import { useAuth } from '@/context/AuthContext';
+
+const defaultImage = "/image/flat.jpg"
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   // Use localStorage to persist dark mode preference
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { userProfile, signOut } = useAuth();
 
   // Only run after mount to avoid hydration mismatch
   useEffect(() => {
@@ -51,6 +55,19 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     document.addEventListener('click', handleOutsideClick);
     return () => document.removeEventListener('click', handleOutsideClick);
   }, [sidebarOpen]);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (menuOpen && !target.closest('.user-menu-container')) {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [menuOpen]);
 
   // Don't render UI until after client-side hydration to prevent theme flickering
   if (!mounted) {
@@ -95,14 +112,52 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                     <span className="text-2xl text-gray-600">🌙</span>
                   )}
                 </button>
-                <div className="ml-4 flex items-center">
+                
+                {/* User Profile Menu */}
+                <div className="ml-4 flex items-center user-menu-container">
                   <div className="relative">
-                    <button className="flex text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <button 
+                      onClick={() => setMenuOpen(!menuOpen)}
+                      className="flex text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
                       <span className="sr-only">Open user menu</span>
-                      <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
-                        U
-                      </div>
+                      {userProfile?.photoURL ? (
+                        <div className="h-8 w-8 relative overflow-hidden rounded-full border-2 border-gray-200 dark:border-gray-700">
+                          <Image 
+                            src={userProfile.photoURL || defaultImage} 
+                            alt={userProfile.displayName || "User profile"} 
+                            fill
+                            className="object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center text-white">
+                          {userProfile?.displayName ? userProfile.displayName[0].toUpperCase() : (userProfile?.email ? userProfile.email[0].toUpperCase() : 'U')}
+                        </div>
+                      )}
                     </button>
+
+                    {/* Profile dropdown */}
+                    {menuOpen && (
+                      <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg py-1 bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 focus:outline-none">
+                        <div className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700">
+                          <p className="font-medium">{userProfile?.displayName || 'User'}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{userProfile?.email || ''}</p>
+                        </div>
+                        <a href="/profile" className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">
+                          Your Profile
+                        </a>
+                        <a href="/settings" className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">
+                          Settings
+                        </a>
+                        <button
+                          onClick={() => signOut()}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Sign out
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -112,7 +167,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
         {/* Main content */}
         <main className="flex-1 max-w-7xl w-full mx-auto py-6 px-4 sm:px-6 lg:px-8">
-          <AuthProvider>{children}</AuthProvider>
+          {children}
         </main>
 
         {/* Footer */}

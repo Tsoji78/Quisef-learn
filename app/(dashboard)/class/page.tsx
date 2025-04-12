@@ -1,6 +1,7 @@
-"use client"
+"use client";
+
 import React, { useState } from 'react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 
 // Sample activity type
 interface Activity {
@@ -14,30 +15,30 @@ interface Activity {
 // Sample data - in a real app, this would come from an API or database
 const sampleActivities: { [key: string]: Activity[] } = {
   '2024-03-26': [
-    { 
-      id: 1, 
-      title: 'Morning Yoga', 
-      time: '07:00 AM', 
+    {
+      id: 1,
+      title: 'Morning Yoga',
+      time: '07:00 AM',
       location: 'Fitness Studio',
-      className: 'bg-green-100 text-green-800'
+      className: 'bg-green-100 text-green-800',
     },
-    { 
-      id: 2, 
-      title: 'Calculus Lecture', 
-      time: '10:00 AM', 
+    {
+      id: 2,
+      title: 'Calculus Lecture',
+      time: '10:00 AM',
       location: 'Math Building, Room 205',
-      className: 'bg-blue-100 text-blue-800'
-    }
+      className: 'bg-blue-100 text-blue-800',
+    },
   ],
   '2024-03-27': [
-    { 
-      id: 3, 
-      title: 'Computer Science Workshop', 
-      time: '02:00 PM', 
+    {
+      id: 3,
+      title: 'Computer Science Workshop',
+      time: '02:00 PM',
       location: 'Tech Center',
-      className: 'bg-purple-100 text-purple-800'
-    }
-  ]
+      className: 'bg-purple-100 text-purple-800',
+    },
+  ],
 };
 
 const ClassSchedulePage: React.FC = () => {
@@ -51,12 +52,12 @@ const ClassSchedulePage: React.FC = () => {
 
   const calendarDays = eachDayOfInterval({
     start: calendarStart,
-    end: calendarEnd
+    end: calendarEnd,
   });
 
   // Navigate between months
   const changeMonth = (direction: 'prev' | 'next') => {
-    setCurrentMonth(prev => {
+    setCurrentMonth((prev) => {
       const newDate = new Date(prev);
       newDate.setMonth(newDate.getMonth() + (direction === 'next' ? 1 : -1));
       return newDate;
@@ -68,17 +69,15 @@ const ClassSchedulePage: React.FC = () => {
       <div className="bg-white shadow-lg rounded-lg overflow-hidden">
         {/* Month Navigation */}
         <div className="flex justify-between items-center bg-gray-100 p-4">
-          <button 
-            onClick={() => changeMonth('prev')} 
+          <button
+            onClick={() => changeMonth('prev')}
             className="text-gray-600 hover:text-gray-800 transition"
           >
             ← Previous
           </button>
-          <h2 className="text-2xl font-bold text-gray-800">
-            {format(currentMonth, 'MMMM yyyy')}
-          </h2>
-          <button 
-            onClick={() => changeMonth('next')} 
+          <h2 className="text-2xl font-bold text-gray-800">{format(currentMonth, 'MMMM yyyy')}</h2>
+          <button
+            onClick={() => changeMonth('next')}
             className="text-gray-600 hover:text-gray-800 transition"
           >
             Next →
@@ -88,9 +87,9 @@ const ClassSchedulePage: React.FC = () => {
         {/* Calendar Grid */}
         <div className="grid grid-cols-7 gap-2 p-4">
           {/* Weekday Headers */}
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-            <div 
-              key={day} 
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+            <div
+              key={day}
               className="text-center font-semibold text-gray-600 uppercase text-sm"
             >
               {day}
@@ -104,17 +103,17 @@ const ClassSchedulePage: React.FC = () => {
             const activities = sampleActivities[dateKey] || [];
 
             return (
-              <div 
-                key={day.toISOString()} 
+              <div
+                key={day.toISOString()}
                 className={`
-                  border rounded-lg p-2 min-h-[120px] 
+                  border rounded-lg p-2 min-h-[120px]
                   ${isCurrentMonth ? 'bg-white' : 'bg-gray-50 text-gray-400'}
                 `}
               >
                 <div className="flex justify-between items-center mb-2">
-                  <span 
+                  <span
                     className={`
-                      text-sm font-semibold 
+                      text-sm font-semibold
                       ${isCurrentMonth ? 'text-gray-800' : 'text-gray-400'}
                     `}
                   >
@@ -124,11 +123,11 @@ const ClassSchedulePage: React.FC = () => {
 
                 {/* Activities for the day */}
                 <div className="space-y-1">
-                  {activities.map(activity => (
-                    <div 
-                      key={activity.id} 
+                  {activities.map((activity) => (
+                    <div
+                      key={activity.id}
                       className={`
-                        rounded px-2 py-1 text-xs 
+                        rounded px-2 py-1 text-xs
                         ${activity.className || 'bg-gray-100'}
                       `}
                     >

@@ -6,7 +6,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { auth, googleProvider } from '@/lib/firebase';
-import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 
 interface CarouselImage {
   src: string;
@@ -49,7 +49,7 @@ const LoginPage: React.FC = () => {
         return;
       }
       console.log('Successfully logged in with email');
-      router.push("/home"); // Redirect to home page
+      router.push("/dashboard"); // Redirect to dashboard instead of home
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -62,11 +62,33 @@ const LoginPage: React.FC = () => {
     setError(null);
     
     try {
-      await signInWithPopup(auth, googleProvider);
+      // Configure Google provider to request proper scopes for profile data
+      const provider = new GoogleAuthProvider();
+      provider.addScope('profile');
+      provider.addScope('email');
+      
+      // Force account selection even when already logged in
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      
+      // Sign in with popup
+      const result = await signInWithPopup(auth, provider);
+      
+      // Get the profile info from Google Sign In
+      const user = result.user;
+      
       console.log('Successfully logged in with Google');
-      router.push("/home"); // Redirect to home page
+      console.log('Profile image URL:', user.photoURL);
+      
+      // Redirect to home
+      router.push("/home");
     } catch (error: any) {
-      setError(error.message);
+      if (error.code === 'auth/popup-closed-by-user') {
+        setError("Sign-in canceled. Please try again.");
+      } else {
+        setError(error.message);
+      }
     } finally {
       setLoading(false);
     }
