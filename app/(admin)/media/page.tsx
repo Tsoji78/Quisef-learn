@@ -17,8 +17,8 @@ interface MediaItem {
 }
 
 // Environment variables for Cloudinary (store these securely in your .env file)
-const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'your_cloud_name';
-const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'your_upload_preset';
+const cloud_name = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
 // Custom hook for clipboard functionality
 const useCopyToClipboard = () => {
@@ -106,77 +106,77 @@ export default function MediaUploadHub() {
   const uploadToCloudinary = async (file: File) => {
     setUploading(true);
     setUploadProgress(0);
-    
-    // Create a FormData object to send the file
+  
+    if (!cloud_name || !CLOUDINARY_UPLOAD_PRESET) {
+      toast.error('Cloudinary configuration is missing.');
+      setUploading(false);
+      return;
+    }
+  
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('upload_preset', "ml_default");
-    
-    // If custom name is provided, add it to the upload params
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  
     if (customName) {
       formData.append('public_id', customName);
     }
-    
+  
     try {
-      // Simulate progress for better UX
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
           const newProgress = prev + 10;
           return newProgress >= 90 ? 90 : newProgress;
         });
       }, 500);
-
-      // Make the actual upload request to Cloudinary
+  
       const response = await fetch(
-        `https://api.cloudinary.com/v1_1/dyl8jpo9a/auto/upload`,
+        `https://api.cloudinary.com/v1_1/${cloud_name}/auto/upload`,
         {
           method: 'POST',
           body: formData,
         }
       );
-
+  
       clearInterval(progressInterval);
       setUploadProgress(100);
-
+  
       if (!response.ok) {
-        throw new Error('Upload failed');
+        const errorData = await response.json();
+        console.error('Cloudinary error response:', errorData);
+        throw new Error(`Upload failed: ${errorData.message || 'Unknown error'}`);
       }
-
+  
       const data = await response.json();
-      
-      // Determine file type
       let fileType: 'image' | 'video' | 'gif' = 'image';
       if (file.type.includes('video')) {
         fileType = 'video';
       } else if (file.name.endsWith('.gif')) {
         fileType = 'gif';
       }
-      
-      // Create embed code based on file type
+  
       let embedCode = '';
       if (fileType === 'image' || fileType === 'gif') {
         embedCode = `<img src="${data.secure_url}" alt="${customName || file.name}" />`;
       } else if (fileType === 'video') {
         embedCode = `<video controls src="${data.secure_url}"></video>`;
       }
-      
-      // Add the new media item to our state
+  
       const newItem: MediaItem = {
         id: data.public_id,
         name: customName || file.name,
         url: data.secure_url,
         type: fileType,
         timestamp: new Date(),
-        embedCode: embedCode
+        embedCode: embedCode,
       };
-      
+  
       setMediaItems(prev => [newItem, ...prev]);
       setCustomName('');
-      
       toast.success(`"${newItem.name}" uploaded successfully!`);
     } catch (error) {
       console.error('Error uploading to Cloudinary:', error);
-      toast.error('Upload failed. Please check your Cloudinary credentials.');
+      const errorMessage = error instanceof Error ? error.message : 'Please check your Cloudinary credentials.';
+      toast.error(`Upload failed: ${errorMessage}`);
     } finally {
       setUploading(false);
       setUploadProgress(0);

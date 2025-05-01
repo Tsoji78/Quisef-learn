@@ -1,4 +1,5 @@
-"use client"
+'use client';
+
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Users, 
@@ -9,10 +10,22 @@ import {
   Send,
   X
 } from 'lucide-react';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { 
+  collection, 
+  onSnapshot, 
+  query, 
+  doc, 
+  updateDoc, 
+  arrayUnion, 
+  addDoc 
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useRouter } from 'next/navigation';
 
 // Interfaces for data structures
 interface Member {
-  id: number;
+  id: string; // Changed to string for Firestore compatibility
   name: string;
   email: string;
   role: 'Student' | 'Instructor' | 'Teaching Assistant';
@@ -20,14 +33,14 @@ interface Member {
 }
 
 interface Message {
-  id: number;
-  senderId: number;
+  id: string; // Changed to string for Firestore document IDs
+  senderId: string;
   content: string;
   timestamp: Date;
 }
 
 interface ChatForum {
-  id: number;
+  id: number; // Kept as number to match previous group creation logic
   title: string;
   description: string;
   memberCount: number;
@@ -43,65 +56,28 @@ interface Assignment {
 }
 
 interface CourseGroup {
-  id: number;
+  id: string; // Changed to string for Firestore document IDs
   name: string;
   description: string;
+  courseId: string;
   members: Member[];
   chatForums: ChatForum[];
   assignments: Assignment[];
+  createdAt?: Date;
 }
 
 const CourseGroupManagementPage: React.FC = () => {
-  const [groups, setGroups] = useState<CourseGroup[]>([
-    {
-      id: 1,
-      name: 'Computer Science 101',
-      description: 'Introductory Computer Science Course',
-      members: [
-        { 
-          id: 1, 
-          name: 'John Doe', 
-          email: 'john@example.com', 
-          role: 'Student',
-          profileImage: '/api/placeholder/50/50'
-        },
-        { 
-          id: 2, 
-          name: 'Jane Smith', 
-          email: 'jane@example.com', 
-          role: 'Instructor',
-          profileImage: '/api/placeholder/50/50'
-        }
-      ],
-      chatForums: [
-        {
-          id: 1,
-          title: 'General Discussion',
-          description: 'Course-wide chat for general topics',
-          memberCount: 25,
-          lastMessageAt: new Date(),
-          messages: [
-            { id: 1, senderId: 1, content: 'Welcome to the course!', timestamp: new Date() }
-          ]
-        }
-      ],
-      assignments: [
-        {
-          id: 1,
-          title: 'Midterm Project',
-          dueDate: new Date('2024-04-15'),
-          status: 'Pending'
-        }
-      ]
-    }
-  ]);
-
+  const [groups, setGroups] = useState<CourseGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CourseGroup | null>(null);
   const [activeTab, setActiveTab] = useState<'members' | 'forums' | 'assignments'>('members');
   const [selectedForum, setSelectedForum] = useState<ChatForum | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
+  const router = useRouter();
+
   // Modal states
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
   const [showNewForumModal, setShowNewForumModal] = useState(false);
@@ -110,61 +86,190 @@ const CourseGroupManagementPage: React.FC = () => {
   const [newForumTitle, setNewForumTitle] = useState('');
   const [newForumDescription, setNewForumDescription] = useState('');
 
+  // Authentication check
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        setUser(null);
+        router.push('/login'); // Redirect to login if not authenticated
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
+  // Fetch groups where the user is a member
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+    const q = query(collection(db, 'groups'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        try {
+          const groupsData: CourseGroup[] = snapshot.docs
+            .map((doc) => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                name: data.name || 'Untitled Group',
+                description: data.description || '',
+                courseId: data.courseId || '',
+                members: data.members || [],
+                chatForums: data.chatForums || [],
+                assignments: data.assignments || [],
+                createdAt: data.createdAt?.toDate(),
+              } as CourseGroup;
+            })
+            .filter((group) =>
+              group.members.some((member) => member.id === user.uid)
+            );
+
+          setGroups(groupsData);
+          setError(groupsData.length === 0 ? 'No groups found. Enroll in a course to join groups.' : null);
+          setLoading(false);
+          if (groupsData.length > 0 && !selectedGroup) {
+            setSelectedGroup(groupsData[0]);
+          }
+        } catch (err: any) {
+          console.error('Error fetching groups:', err);
+          setError(`Failed to load groups: ${err.message || 'Unknown error'}`);
+          setGroups([]);
+          setLoading(false);
+        }
+      },
+      (err) => {
+        console.error('Snapshot error:', err);
+        setError(`Failed to load groups: ${err.message || 'Unknown error'}`);
+        setGroups([]);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Fetch messages for selected forum in real-time
+  useEffect(() => {
+    if (!selectedGroup || !selectedForum || !user) return;
+
+    const messagesQuery = query(
+      collection(db, 'groups', selectedGroup.id, 'chatForums', selectedForum.id.toString(), 'messages')
+    );
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        const messagesData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          senderId: doc.data().senderId,
+          content: doc.data().content,
+          timestamp: doc.data().timestamp?.toDate() || new Date(),
+        })) as Message[];
+        setSelectedForum((prev) => (prev ? { ...prev, messages: messagesData } : prev));
+      },
+      (err) => {
+        console.error('Error fetching messages:', err);
+        setError('Failed to load messages.');
+      }
+    );
+
+    return () => unsubscribe();
+  }, [selectedGroup, selectedForum, user]);
+
   // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedForum?.messages]);
 
-  const handleCreateNewGroup = () => {
-    if (!newGroupName.trim()) return;
-    
-    const newGroup: CourseGroup = {
-      id: Math.max(...groups.map(g => g.id)) + 1,
-      name: newGroupName,
-      description: newGroupDescription,
-      members: [],
-      chatForums: [],
-      assignments: []
-    };
-    
-    setGroups([...groups, newGroup]);
-    setNewGroupName('');
-    setNewGroupDescription('');
-    setShowNewGroupModal(false);
-    setSelectedGroup(newGroup);
+  const handleCreateNewGroup = async () => {
+    if (!newGroupName.trim() || !user) return;
+
+    try {
+      const newGroup: Omit<CourseGroup, 'id'> = {
+        name: newGroupName,
+        description: newGroupDescription,
+        courseId: '', // Student-created groups may not be tied to a course
+        members: [
+          {
+            id: user.uid,
+            name: user.displayName || 'Student',
+            email: user.email || '',
+            role: 'Student',
+            profileImage: user.photoURL || '/api/placeholder/50/50',
+          },
+        ],
+        chatForums: [],
+        assignments: [],
+        createdAt: new Date(),
+      };
+
+      const docRef = await addDoc(collection(db, 'groups'), newGroup);
+      setNewGroupName('');
+      setNewGroupDescription('');
+      setShowNewGroupModal(false);
+      // Updated group will be fetched via onSnapshot
+    } catch (err: any) {
+      console.error('Error creating group:', err);
+      setError(`Failed to create group: ${err.message || 'Unknown error'}`);
+    }
   };
 
-  const handleCreateNewForum = () => {
-    if (!selectedGroup || !newForumTitle.trim()) return;
+  const handleCreateNewForum = async () => {
+    if (!selectedGroup || !newForumTitle.trim() || !user) return;
 
-    const newForum: ChatForum = {
-      id: Math.max(...selectedGroup.chatForums.map(f => f.id), 0) + 1,
-      title: newForumTitle,
-      description: newForumDescription,
-      memberCount: selectedGroup.members.length,
-      lastMessageAt: new Date(),
-      messages: []
+    try {
+      const newForum: ChatForum = {
+        id: Math.max(...selectedGroup.chatForums.map(f => f.id), 0) + 1,
+        title: newForumTitle,
+        description: newForumDescription,
+        memberCount: selectedGroup.members.length,
+        lastMessageAt: new Date(),
+        messages: [],
+      };
+
+      const groupRef = doc(db, 'groups', selectedGroup.id);
+      await updateDoc(groupRef, {
+        chatForums: arrayUnion(newForum),
+      });
+
+      setNewForumTitle('');
+      setNewForumDescription('');
+      setShowNewForumModal(false);
+      setSelectedForum(newForum);
+    } catch (err: any) {
+      console.error('Error creating forum:', err);
+      setError(`Failed to create forum: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const sendMessage = async (forumId: number) => {
+    if (!newMessage.trim() || !selectedGroup || !selectedForum || !user) return;
+
+    const messageData: Omit<Message, 'id'> = {
+      senderId: user.uid,
+      content: newMessage,
+      timestamp: new Date(),
     };
 
-    const updatedGroups = groups.map(group => {
-      if (group.id === selectedGroup.id) {
-        return {
-          ...group,
-          chatForums: [...group.chatForums, newForum]
-        };
-      }
-      return group;
-    });
-
-    setGroups(updatedGroups);
-    setSelectedGroup({
-      ...selectedGroup,
-      chatForums: [...selectedGroup.chatForums, newForum]
-    });
-    setNewForumTitle('');
-    setNewForumDescription('');
-    setShowNewForumModal(false);
-    setSelectedForum(newForum);
+    try {
+      await addDoc(
+        collection(db, 'groups', selectedGroup.id, 'chatForums', forumId.toString(), 'messages'),
+        messageData
+      );
+      // Update lastMessageAt
+      const groupRef = doc(db, 'groups', selectedGroup.id);
+      const updatedForums = selectedGroup.chatForums.map((forum) =>
+        forum.id === forumId ? { ...forum, lastMessageAt: new Date() } : forum
+      );
+      await updateDoc(groupRef, { chatForums: updatedForums });
+      setNewMessage('');
+    } catch (err: any) {
+      console.error('Error sending message:', err);
+      setError(`Failed to send message: ${err.message || 'Unknown error'}`);
+    }
   };
 
   const renderMembersList = () => {
@@ -218,7 +323,6 @@ const CourseGroupManagementPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                
               </div>
             ))}
           </div>
@@ -230,58 +334,6 @@ const CourseGroupManagementPage: React.FC = () => {
   const renderChatForums = () => {
     if (!selectedGroup) return null;
 
-    const sendMessage = (forumId: number) => {
-      if (!newMessage.trim()) return;
-
-      const updatedGroups = groups.map(group => {
-        if (group.id === selectedGroup.id) {
-          return {
-            ...group,
-            chatForums: group.chatForums.map(forum => {
-              if (forum.id === forumId) {
-                return {
-                  ...forum,
-                  messages: [
-                    ...forum.messages,
-                    {
-                      id: forum.messages.length + 1,
-                      senderId: 1, // Assuming current user is ID 1
-                      content: newMessage,
-                      timestamp: new Date()
-                    }
-                  ],
-                  lastMessageAt: new Date()
-                };
-              }
-              return forum;
-            })
-          };
-        }
-        return group;
-      });
-
-      setGroups(updatedGroups);
-      
-      // Update selected forum with new message
-      if (selectedForum && selectedForum.id === forumId) {
-        setSelectedForum({
-          ...selectedForum,
-          messages: [
-            ...selectedForum.messages,
-            {
-              id: selectedForum.messages.length + 1,
-              senderId: 1,
-              content: newMessage,
-              timestamp: new Date()
-            }
-          ],
-          lastMessageAt: new Date()
-        });
-      }
-      
-      setNewMessage('');
-    };
-
     return (
       <div className="bg-white shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
         <div className="flex justify-between items-center p-4 border-b">
@@ -291,12 +343,17 @@ const CourseGroupManagementPage: React.FC = () => {
               {selectedGroup.chatForums.length}
             </span>
           </h3>
-         
+          <button
+            onClick={() => setShowNewForumModal(true)}
+            className="flex items-center text-blue-600 hover:text-blue-800"
+          >
+            <Plus size={16} className="mr-1" />
+            New Forum
+          </button>
         </div>
 
         {selectedForum ? (
           <div className="flex-1 flex flex-col">
-            {/* Forum Header */}
             <div className="p-4 bg-gray-50 border-b">
               <h4 className="font-semibold text-blue-800 text-lg">{selectedForum.title}</h4>
               <p className="text-sm text-gray-600">{selectedForum.description}</p>
@@ -308,18 +365,17 @@ const CourseGroupManagementPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Messages Area */}
             <div className="flex-1 p-4 overflow-y-auto">
               {selectedForum.messages.map(message => (
                 <div
                   key={message.id}
                   className={`flex mb-4 ${
-                    message.senderId === 1 ? 'justify-end' : 'justify-start'
+                    message.senderId === user?.uid ? 'justify-end' : 'justify-start'
                   }`}
                 >
                   <div
                     className={`max-w-[70%] p-3 rounded-lg ${
-                      message.senderId === 1
+                      message.senderId === user?.uid
                         ? 'bg-blue-100 text-black'
                         : 'bg-gray-100 text-gray-900'
                     }`}
@@ -334,7 +390,7 @@ const CourseGroupManagementPage: React.FC = () => {
                         className="w-6 h-6 rounded-full"
                       />
                       <span className="font-semibold text-sm">
-                        {selectedGroup.members.find(m => m.id === message.senderId)?.name}
+                        {selectedGroup.members.find(m => m.id === message.senderId)?.name || 'Unknown'}
                       </span>
                     </div>
                     <p className="mt-1">{message.content}</p>
@@ -347,7 +403,6 @@ const CourseGroupManagementPage: React.FC = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
             <div className="p-4 border-t bg-white">
               <div className="flex text-blue-800 items-center gap-2">
                 <input
@@ -409,7 +464,6 @@ const CourseGroupManagementPage: React.FC = () => {
               {selectedGroup.assignments.length}
             </span>
           </h3>
-          
         </div>
         <div className="p-4 space-y-4">
           {selectedGroup.assignments.map(assignment => (
@@ -440,37 +494,56 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   };
 
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Groups Sidebar */}
         <div className="bg-white shadow-md rounded-lg">
           <div className="p-4 border-b flex justify-between items-center">
             <h2 className="text-2xl text-blue-800 font-bold">Course Groups</h2>
-            
+           
           </div>
           <div className="divide-y max-h-[calc(100vh-150px)] overflow-y-auto">
-            {groups.map(group => (
-              <div 
-                key={group.id} 
-                className={`
-                  p-4 cursor-pointer hover:bg-gray-50 transition
-                  ${selectedGroup?.id === group.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''}
-                `}
-                onClick={() => setSelectedGroup(group)}
-              >
-                <h3 className="font-semibold text-gray-800">{group.name}</h3>
-                <p className="text-sm text-gray-600">{group.description}</p>
+            {groups.length > 0 ? (
+              groups.map(group => (
+                <div 
+                  key={group.id} 
+                  className={`
+                    p-4 cursor-pointer hover:bg-gray-50 transition
+                    ${selectedGroup?.id === group.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''}
+                  `}
+                  onClick={() => {
+                    setSelectedGroup(group);
+                    setSelectedForum(null);
+                  }}
+                >
+                  <h3 className="font-semibold text-gray-800">{group.name}</h3>
+                  <p className="text-sm text-gray-600">{group.description}</p>
+                </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-gray-500">
+                No groups available. Create or join a group.
               </div>
-            ))}
+            )}
           </div>
         </div>
 
-        {/* Group Details */}
         <div className="col-span-2">
           {selectedGroup ? (
             <>
-              {/* Tabs */}
               <div className="flex flex-col sm:flex-row mb-6 bg-white rounded-lg shadow-sm">
                 {[
                   { key: 'members', label: 'Members', icon: Users },
@@ -493,7 +566,6 @@ const CourseGroupManagementPage: React.FC = () => {
                 ))}
               </div>
 
-              {/* Content based on active tab */}
               {activeTab === 'members' && renderMembersList()}
               {activeTab === 'forums' && renderChatForums()}
               {activeTab === 'assignments' && renderAssignments()}
@@ -508,17 +580,65 @@ const CourseGroupManagementPage: React.FC = () => {
 
     
 
-      {/* CSS for btn-primary */}
+      {/* New Forum Modal */}
+      {showNewForumModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">Create New Forum</h3>
+              <button onClick={() => setShowNewForumModal(false)}>
+                <X size={20} className="text-gray-600" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Forum Title</label>
+                <input
+                  type="text"
+                  value={newForumTitle}
+                  onChange={(e) => setNewForumTitle(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  placeholder="Enter forum title"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Description</label>
+                <textarea
+                  value={newForumDescription}
+                  onChange={(e) => setNewForumDescription(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  placeholder="Enter forum description"
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <button
+                  onClick={() => setShowNewForumModal(false)}
+                  className="px-4 py-2 text-gray-600 border rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateNewForum}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         .btn-primary {
-          background: linear-gradient(to right,rgb(28, 31, 202),rgb(43, 40, 217));
+          background: linear-gradient(to right, rgb(28, 31, 202), rgb(43, 40, 217));
           color: white;
           border-radius: 0.5rem;
           padding: 0.5rem 1rem;
           transition: all 0.2s ease;
         }
         .btn-primary:hover {
-          background: linear-gradient(to right,rgb(58, 76, 237),rgb(33, 35, 182));
+          background: linear-gradient(to right, rgb(58, 76, 237), rgb(33, 35, 182));
           transform: translateY(-1px);
         }
       `}</style>

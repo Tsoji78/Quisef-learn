@@ -8,6 +8,8 @@ import { getFirestore, collection, addDoc, doc, getDoc, setDoc, deleteDoc, serve
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
+import { v4 as uuidv4 } from 'uuid';
+
 
 interface Module {
   id: string;
@@ -49,7 +51,7 @@ export default function CourseManagementPage() {
     level: 'Beginner',
     duration: '',
     thumbnail: '/api/placeholder/400/250?text=Course',
-    modules: [{ id: crypto.randomUUID(), title: '', content: '' }],
+    modules: [{ id: uuidv4(), title: '', content: '' }],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [step, setStep] = useState(1);
@@ -88,12 +90,12 @@ export default function CourseManagementPage() {
             const courseData = docSnap.data() as Course;
             const modulesWithIds = courseData.modules.map((module) => ({
               ...module,
-              id: module.id || crypto.randomUUID(),
+              id: module.id || uuidv4(), // Changed from crypto.randomUUID()
             }));
             setFormData({
               ...courseData,
               id: docSnap.id,
-              modules: modulesWithIds.length > 0 ? modulesWithIds : [{ id: crypto.randomUUID(), title: '', content: '' }],
+              modules: modulesWithIds.length > 0 ? modulesWithIds : [{ id: uuidv4(), title: '', content: '' }], // Changed from crypto.randomUUID()
             });
             setErrors({});
           } else {
@@ -196,7 +198,7 @@ export default function CourseManagementPage() {
   const addModule = () => {
     setFormData({
       ...formData,
-      modules: [...formData.modules, { id: crypto.randomUUID(), title: '', content: '' }],
+      modules: [...formData.modules, { id: uuidv4(), title: '', content: '' }],
     });
     setCurrentModuleIndex(formData.modules.length);
   };

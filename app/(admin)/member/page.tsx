@@ -1,19 +1,13 @@
-"use client"
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Users, 
-  MessageCircle, 
-  FileText, 
-  Plus, 
-  Edit2, 
-  Trash2, 
-  Search,
-  Send
-} from 'lucide-react';
+'use client';
 
-// Interfaces for data structures
+import React, { useState, useRef, useEffect } from 'react';
+import { Users, MessageCircle, FileText, Edit2, Trash2, Search, Send, Loader } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { collection, onSnapshot, query, doc, updateDoc, arrayUnion, arrayRemove, addDoc } from 'firebase/firestore';
+import { toast } from 'react-hot-toast';
+
 interface Member {
-  id: number;
+  id: string;
   name: string;
   email: string;
   role: 'Student' | 'Instructor' | 'Teaching Assistant';
@@ -21,8 +15,8 @@ interface Member {
 }
 
 interface Message {
-  id: number;
-  senderId: number;
+  id: string;
+  senderId: string;
   content: string;
   timestamp: Date;
 }
@@ -44,88 +38,164 @@ interface Assignment {
 }
 
 interface CourseGroup {
-  id: number;
+  id: string;
   name: string;
   description: string;
+  courseId: string;
   members: Member[];
   chatForums: ChatForum[];
   assignments: Assignment[];
+  createdAt?: Date;
 }
 
 const CourseGroupManagementPage: React.FC = () => {
-  const [groups, setGroups] = useState<CourseGroup[]>([
-    {
-      id: 1,
-      name: 'Computer Science 101',
-      description: 'Introductory Computer Science Course',
-      members: [
-        { 
-          id: 1, 
-          name: 'John Doe', 
-          email: 'john@example.com', 
-          role: 'Student',
-          profileImage: '/api/placeholder/50/50'
-        },
-        { 
-          id: 2, 
-          name: 'Jane Smith', 
-          email: 'jane@example.com', 
-          role: 'Instructor',
-          profileImage: '/api/placeholder/50/50'
-        }
-      ],
-      chatForums: [
-        {
-          id: 1,
-          title: 'General Discussion',
-          description: 'Course-wide chat for general topics',
-          memberCount: 25,
-          lastMessageAt: new Date(),
-          messages: [
-            { id: 1, senderId: 1, content: 'Welcome to the course!', timestamp: new Date() }
-          ]
-        }
-      ],
-      assignments: [
-        {
-          id: 1,
-          title: 'Midterm Project',
-          dueDate: new Date('2024-04-15'),
-          status: 'Pending'
-        }
-      ]
-    }
-  ]);
-
+  const [groups, setGroups] = useState<CourseGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<CourseGroup | null>(null);
   const [activeTab, setActiveTab] = useState<'members' | 'forums' | 'assignments'>('members');
   const [selectedForum, setSelectedForum] = useState<ChatForum | null>(null);
   const [newMessage, setNewMessage] = useState('');
-  const [showNewGroupForm, setShowNewGroupForm] = useState(false);
-  const [newGroupData, setNewGroupData] = useState({ name: '', description: '' });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Fetch groups from Firestore in real-time
+  useEffect(() => {
+    setLoading(true);
+    const q = query(collection(db, 'groups'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        try {
+          const groupsData: CourseGroup[] = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            name: doc.data().name || 'Untitled Group',
+            description: doc.data().description || '',
+            courseId: doc.data().courseId || '',
+            members: doc.data().members || [],
+            chatForums: doc.data().chatForums || [],
+            assignments: doc.data().assignments || [],
+            createdAt: doc.data().createdAt?.toDate(),
+          })) as CourseGroup[];
+
+          setGroups(groupsData);
+          setError(groupsData.length === 0 ? 'No groups found. Create a course to add groups.' : null);
+          setLoading(false);
+          if (groupsData.length > 0 && !selectedGroup) {
+            setSelectedGroup(groupsData[0]);
+          }
+        } catch (err: any) {
+          console.error('Error fetching groups:', err);
+          setError(`Failed to load groups: ${err.message || 'Unknown error'}`);
+          setGroups([]);
+          setLoading(false);
+        }
+      },
+      (err) => {
+        console.error('Snapshot error:', err);
+        setError(`Failed to load groups: ${err.message || 'Unknown error'}`);
+        setGroups([]);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch messages for selected forum in real-time
+  useEffect(() => {
+    if (!selectedGroup || !selectedForum) return;
+
+    const messagesQuery = query(
+      collection(db, 'groups', selectedGroup.id, 'chatForums', selectedForum.id.toString(), 'messages')
+    );
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        const messagesData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          timestamp: doc.data().timestamp?.toDate() || new Date(),
+        })) as Message[];
+        setSelectedForum((prev) => (prev ? { ...prev, messages: messagesData } : prev));
+      },
+      (err) => {
+        console.error('Error fetching messages:', err);
+        toast.error('Failed to load messages.');
+      }
+    );
+
+    return () => unsubscribe();
+  }, [selectedGroup, selectedForum]);
 
   // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedForum?.messages]);
 
-  const addNewGroup = () => {
-    if (!newGroupData.name) return;
-    
-    const newGroup: CourseGroup = {
-      id: groups.length + 1,
-      name: newGroupData.name,
-      description: newGroupData.description,
-      members: [],
-      chatForums: [],
-      assignments: []
+  // Edit member role
+  const editMemberRole = async (groupId: string, memberId: string, newRole: 'Student' | 'Instructor' | 'Teaching Assistant') => {
+    try {
+      const groupRef = doc(db, 'groups', groupId);
+      const memberToUpdate = selectedGroup!.members.find((m) => m.id === memberId);
+      if (!memberToUpdate) return;
+
+      await updateDoc(groupRef, {
+        members: arrayRemove(memberToUpdate),
+      });
+      await updateDoc(groupRef, {
+        members: arrayUnion({ ...memberToUpdate, role: newRole }),
+      });
+      toast.success('Member role updated successfully.');
+    } catch (error) {
+      console.error('Error updating member role:', error);
+      toast.error('Failed to update member role.');
+    }
+  };
+
+  // Remove member from group
+  const removeMember = async (groupId: string, memberId: string) => {
+    try {
+      const groupRef = doc(db, 'groups', groupId);
+const memberToRemove = selectedGroup!.members.find((m) => m.id === memberId);
+      if (!memberToRemove) return;
+
+      await updateDoc(groupRef, {
+        members: arrayRemove(memberToRemove),
+      });
+      toast.success('Member removed successfully.');
+    } catch (error) {
+      console.error('Error removing member:', error);
+      toast.error('Failed to remove member.');
+    }
+  };
+
+  // Get sender ID dynamically (use first member, typically instructor)
+  const getSenderId = () => {
+    return selectedGroup?.members[0]?.id || 'default-user';
+  };
+
+  const sendMessage = async (forumId: number) => {
+    if (!newMessage.trim() || !selectedGroup || !selectedForum) {
+      toast.error('Please select a forum and enter a message.');
+      return;
+    }
+
+    const messageData = {
+      senderId: getSenderId(),
+      content: newMessage,
+      timestamp: new Date(),
     };
-    
-    setGroups([...groups, newGroup]);
-    setNewGroupData({ name: '', description: '' });
-    setShowNewGroupForm(false);
-    setSelectedGroup(newGroup);
+
+    try {
+      await addDoc(
+        collection(db, 'groups', selectedGroup.id, 'chatForums', forumId.toString(), 'messages'),
+        messageData
+      );
+      setNewMessage('');
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast.error('Failed to send message.');
+    }
   };
 
   const renderMembersList = () => {
@@ -133,49 +203,50 @@ const CourseGroupManagementPage: React.FC = () => {
 
     return (
       <div className="bg-white shadow-md rounded-lg">
-        <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-xl font-semibold flex items-center">
-            <Users className="mr-2 text-blue-600" /> Members 
+        <div className="p-4 border-b">
+          <h3 className="text-xl font-semibold flex items-center text-black">
+            <Users className="mr-2 text-blue-600" /> Members
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.members.length}
             </span>
           </h3>
-          <button className="btn-primary flex items-center">
-            <Plus className="mr-2" /> Add Member
-          </button>
         </div>
         <div className="p-4">
           <div className="flex mb-4">
             <div className="relative flex-grow">
-              <input 
-                type="text" 
-                placeholder="Search members..." 
-                className="w-full pl-10 pr-4 py-2 border rounded-lg"
+              <input
+                type="text"
+                placeholder="Search members..."
+                className="w-full pl-10 pr-4 py-2 border rounded-lg text-black"
               />
               <Search className="absolute left-3 top-3 text-gray-400" />
             </div>
           </div>
           <div className="space-y-4">
-            {selectedGroup.members.map(member => (
-              <div 
-                key={member.id} 
+            {selectedGroup.members.map((member) => (
+              <div
+                key={member.id}
                 className="flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 transition rounded-lg cursor-pointer"
               >
                 <div className="flex items-center">
-                  <img 
-                    src={member.profileImage || '/api/placeholder/50/50'} 
-                    alt={member.name} 
+                  <img
+                    src={member.profileImage || '/api/placeholder/50/50'}
+                    alt={member.name}
                     className="w-10 h-10 rounded-full mr-4"
                   />
                   <div>
-                    <div className="font-semibold">{member.name}</div>
-                    <div className="text-sm text-gray-500">{member.email}</div>
-                    <div 
+                    <div className="font-semibold text-black">{member.name}</div>
+                    <div className="text-sm text-black">{member.email}</div>
+                    <div
                       className={`
                         text-xs px-2 py-1 rounded-full inline-block mt-1
-                        ${member.role === 'Instructor' ? 'bg-green-100 text-green-800' : 
-                          member.role === 'Teaching Assistant' ? 'bg-yellow-100 text-yellow-800' : 
-                          'bg-blue-100 text-blue-800'}
+                        ${
+                          member.role === 'Instructor'
+                            ? 'bg-green-100 text-green-800'
+                            : member.role === 'Teaching Assistant'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }
                       `}
                     >
                       {member.role}
@@ -183,10 +254,25 @@ const CourseGroupManagementPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex space-x-2">
-                  <button className="text-blue-600 hover:bg-blue-200 p-2 rounded-full transition">
-                    <Edit2 size={18} />
-                  </button>
-                  <button className="text-red-600 hover:bg-red-100 p-2 rounded-full transition">
+                  <select
+                    value={member.role}
+                    onChange={(e) =>
+                      editMemberRole(
+                        selectedGroup.id,
+                        member.id,
+                        e.target.value as 'Student' | 'Instructor' | 'Teaching Assistant'
+                      )
+                    }
+                    className="text-blue-600 p-2 rounded-lg border"
+                  >
+                    <option value="Student">Student</option>
+                    <option value="Instructor">Instructor</option>
+                    <option value="Teaching Assistant">Teaching Assistant</option>
+                  </select>
+                  <button
+                    onClick={() => removeMember(selectedGroup.id, member.id)}
+                    className="text-red-600 hover:bg-red-100 p-2 rounded-full transition"
+                  >
                     <Trash2 size={18} />
                   </button>
                 </div>
@@ -201,60 +287,22 @@ const CourseGroupManagementPage: React.FC = () => {
   const renderChatForums = () => {
     if (!selectedGroup) return null;
 
-    const sendMessage = (forumId: number) => {
-      if (!newMessage.trim()) return;
-
-      const updatedGroups = groups.map(group => {
-        if (group.id === selectedGroup.id) {
-          return {
-            ...group,
-            chatForums: group.chatForums.map(forum => {
-              if (forum.id === forumId) {
-                return {
-                  ...forum,
-                  messages: [
-                    ...forum.messages,
-                    {
-                      id: forum.messages.length + 1,
-                      senderId: 1, // Assuming current user is ID 1
-                      content: newMessage,
-                      timestamp: new Date()
-                    }
-                  ],
-                  lastMessageAt: new Date()
-                };
-              }
-              return forum;
-            })
-          };
-        }
-        return group;
-      });
-
-      setGroups(updatedGroups);
-      setNewMessage('');
-    };
-
     return (
       <div className="bg-white shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
-        <div className="flex justify-between text-black items-center p-4 border-b">
-          <h3 className="text-xl font-semibold flex items-center">
+        <div className="p-4 border-b">
+          <h3 className="text-xl font-semibold flex items-center text-black">
             <MessageCircle className="mr-2 text-blue-600" /> Chat Forums
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.chatForums.length}
             </span>
           </h3>
-          <button className="btn-primary flex items-center">
-            <Plus className="mr-2" /> Create Forum
-          </button>
         </div>
 
         {selectedForum ? (
           <div className="flex-1 flex flex-col">
-            {/* Forum Header */}
             <div className="p-4 bg-blue-50 border-b">
-              <h4 className="font-semibold text-blue-200 text-lg">{selectedForum.title}</h4>
-              <p className="text-sm text-blue-500">{selectedForum.description}</p>
+              <h4 className="font-semibold text-lg text-black">{selectedForum.title}</h4>
+              <p className="text-sm text-black">{selectedForum.description}</p>
               <button
                 onClick={() => setSelectedForum(null)}
                 className="text-sm text-blue-600 hover:underline mt-1"
@@ -263,36 +311,31 @@ const CourseGroupManagementPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Messages Area */}
             <div className="flex-1 p-4 overflow-y-auto">
-              {selectedForum.messages.map(message => (
+              {selectedForum.messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex mb-4 ${
-                    message.senderId === 1 ? 'justify-end' : 'justify-start'
-                  }`}
+                  className={`flex mb-4 ${message.senderId === getSenderId() ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
                     className={`max-w-[70%] p-3 rounded-lg ${
-                      message.senderId === 1
-                        ? 'bg-blue-100 text-blue-900'
-                        : 'bg-gray-100 text-black'
+                      message.senderId === getSenderId() ? 'bg-blue-100 text-blue-900' : 'bg-gray-100 text-black'
                     }`}
                   >
                     <div className="flex items-center gap-2">
                       <img
                         src={
-                          selectedGroup.members.find(m => m.id === message.senderId)
-                            ?.profileImage || '/api/placeholder/50/50'
+                          selectedGroup.members.find((m) => m.id === message.senderId)?.profileImage ||
+                          '/api/placeholder/50/50'
                         }
                         alt="avatar"
                         className="w-6 h-6 rounded-full"
                       />
-                      <span className="font-semibold text-sm">
-                        {selectedGroup.members.find(m => m.id === message.senderId)?.name}
+                      <span className="font-semibold text-sm text-black">
+                        {selectedGroup.members.find((m) => m.id === message.senderId)?.name || 'Anonymous'}
                       </span>
                     </div>
-                    <p className="mt-1">{message.content}</p>
+                    <p className="mt-1 text-black">{message.content}</p>
                     <span className="text-xs text-black block mt-1">
                       {message.timestamp.toLocaleTimeString()}
                     </span>
@@ -302,7 +345,6 @@ const CourseGroupManagementPage: React.FC = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
             <div className="p-4 border-t bg-blue-50">
               <div className="flex items-center gap-2">
                 <input
@@ -313,9 +355,7 @@ const CourseGroupManagementPage: React.FC = () => {
                   placeholder="Type a message..."
                   className="flex-1 p-2 border text-black rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <button                  onClick={() => sendMessage(selectedForum.id)}
-                  className="btn-primary p-2"
-                >
+                <button onClick={() => sendMessage(selectedForum.id)} className="btn-primary p-2">
                   <Send size={18} />
                 </button>
               </div>
@@ -323,22 +363,20 @@ const CourseGroupManagementPage: React.FC = () => {
           </div>
         ) : (
           <div className="p-4 space-y-4 overflow-y-auto">
-            {selectedGroup.chatForums.map(forum => (
-              <div 
-                key={forum.id} 
+            {selectedGroup.chatForums.map((forum) => (
+              <div
+                key={forum.id}
                 className="border rounded-lg p-4 bg-blue-50 hover:bg-blue-100 transition cursor-pointer"
                 onClick={() => setSelectedForum(forum)}
               >
                 <div className="flex justify-between items-center">
                   <div>
-                    <h4 className="font-semibold text-lg">{forum.title}</h4>
-                    <p className="text-gray-600 text-sm">{forum.description}</p>
+                    <h4 className="font-semibold text-lg text-black">{forum.title}</h4>
+                    <p className="text-sm text-black">{forum.description}</p>
                   </div>
                   <div className="flex items-center space-x-4">
-                    <div className="text-sm text-gray-500">
-                      {forum.memberCount} Members
-                    </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-black">{forum.memberCount} Members</div>
+                    <div className="text-sm text-black">
                       Last Active: {forum.lastMessageAt.toLocaleDateString()}
                     </div>
                   </div>
@@ -356,39 +394,38 @@ const CourseGroupManagementPage: React.FC = () => {
 
     return (
       <div className="bg-white shadow-md rounded-lg">
-        <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-xl font-semibold flex items-center">
+        <div className="p-4 border-b">
+          <h3 className="text-xl font-semibold flex items-center text-black">
             <FileText className="mr-2 text-blue-600" /> Assignments
             <span className="ml-2 bg-blue-100 text-blue-800 px-2 rounded-full text-sm">
               {selectedGroup.assignments.length}
             </span>
           </h3>
-          <button className="btn-primary flex items-center">
-            <Plus className="mr-2" /> Create Assignment
-          </button>
         </div>
         <div className="p-4 space-y-4">
-          {selectedGroup.assignments.map(assignment => (
-            <div 
-              key={assignment.id} 
+          {selectedGroup.assignments.map((assignment) => (
+            <div
+              key={assignment.id}
               className="border rounded-lg p-4 bg-blue-50 hover:bg-blue-100 transition cursor-pointer flex justify-between items-center"
             >
               <div>
-                <h4 className="font-semibold text-lg">{assignment.title}</h4>
-                <div 
+                <h4 className="font-semibold text-lg text-black">{assignment.title}</h4>
+                <div
                   className={`
                     text-xs px-2 py-1 rounded-full inline-block mt-2
-                    ${assignment.status === 'Completed' ? 'bg-green-100 text-green-800' : 
-                      assignment.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' : 
-                      'bg-blue-100 text-blue-800'}
+                    ${
+                      assignment.status === 'Completed'
+                        ? 'bg-green-100 text-green-800'
+                        : assignment.status === 'In Progress'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-blue-100 text-blue-800'
+                    }
                   `}
                 >
                   {assignment.status}
                 </div>
               </div>
-              <div className="text-sm text-gray-600">
-                Due: {assignment.dueDate.toLocaleDateString()}
-              </div>
+              <div className="text-sm text-black">Due: {assignment.dueDate.toLocaleDateString()}</div>
             </div>
           ))}
         </div>
@@ -396,117 +433,76 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   };
 
-  const renderNewGroupForm = () => {
+  if (loading) {
     return (
-      <div className="p-4 bg-blue-50 border-t">
-        <h3 className="font-medium mb-2">Create New Group</h3>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Group Name *
-            </label>
-            <input
-              type="text"
-              value={newGroupData.name}
-              onChange={(e) => setNewGroupData({...newGroupData, name: e.target.value})}
-              placeholder="Enter group name"
-              className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
-            </label>
-            <textarea
-              value={newGroupData.description}
-              onChange={(e) => setNewGroupData({...newGroupData, description: e.target.value})}
-              placeholder="Enter group description"
-              className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={2}
-            />
-          </div>
-          <div className="flex justify-end space-x-2 pt-2">
-            <button 
-              onClick={() => setShowNewGroupForm(false)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition"
-            >
-              Cancel
-            </button>
-            <button 
-              onClick={addNewGroup}
-              className="btn-primary"
-              disabled={!newGroupData.name}
-            >
-              Create Group
-            </button>
-          </div>
-        </div>
+      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-screen">
+        <Loader className="animate-spin mr-2 text-blue-500" />
+        <span>Loading groups...</span>
       </div>
     );
-  };
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Groups Sidebar */}
         <div className="bg-white shadow-md rounded-lg flex flex-col">
-          <div className="p-4 border-b flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Course Groups</h2>
-            <button 
-              className="btn-primary flex items-center"
-              onClick={() => setShowNewGroupForm(!showNewGroupForm)}
-            >
-              <Plus className="mr-2" /> New Group
-            </button>
+          <div className="p-4 border-b">
+            <h2 className="text-2xl font-bold text-black">Course Groups</h2>
           </div>
           <div className="divide-y overflow-y-auto flex-grow">
-            {groups.map(group => (
-              <div 
-                key={group.id} 
-                className={`
-                  p-4 cursor-pointer hover:bg-blue-50 transition
-                  ${selectedGroup?.id === group.id ? 'bg-blue-100 border-l-4 border-blue-500' : ''}
-                `}
-                onClick={() => {
-                  setSelectedGroup(group);
-                  setSelectedForum(null);
-                }}
-              >
-                <h3 className="font-semibold">{group.name}</h3>
-                <p className="text-sm text-gray-600">{group.description}</p>
-                <div className="flex space-x-2 mt-2">
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                    {group.members.length} members
-                  </span>
-                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                    {group.assignments.length} assignments
-                  </span>
+            {groups.length > 0 ? (
+              groups.map((group) => (
+                <div
+                  key={group.id}
+                  className={`
+                    p-4 cursor-pointer hover:bg-blue-50 transition
+                    ${selectedGroup?.id === group.id ? 'bg-blue-100 border-l-4 border-blue-500' : ''}
+                  `}
+                  onClick={() => {
+                    setSelectedGroup(group);
+                    setSelectedForum(null);
+                  }}
+                >
+                  <h3 className="font-semibold text-black">{group.name}</h3>
+                  <p className="text-sm text-black">{group.description}</p>
+                  <div className="flex space-x-2 mt-2">
+                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                      {group.members.length} members
+                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                      {group.assignments.length} assignments
+                    </span>
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-gray-500">
+                No groups available. Create a course to add a group.
               </div>
-            ))}
+            )}
           </div>
-          {showNewGroupForm && renderNewGroupForm()}
         </div>
 
-        {/* Group Details */}
         <div className="col-span-2">
           {selectedGroup ? (
             <>
-              {/* Tabs */}
               <div className="flex flex-col sm:flex-row mb-6 bg-white rounded-lg shadow-sm">
                 {[
                   { key: 'members', label: 'Members', icon: Users },
                   { key: 'forums', label: 'Chat Forums', icon: MessageCircle },
-                  { key: 'assignments', label: 'Assignments', icon: FileText }
-                ].map(tab => (
+                  { key: 'assignments', label: 'Assignments', icon: FileText },
+                ].map((tab) => (
                   <button
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key as any)}
                     className={`
-                      flex-1 flex items-center justify-center py-3 transition
-                      ${activeTab === tab.key 
-                        ? 'bg-blue-500 text-white' 
-                        : 'text-gray-600 hover:bg-blue-100'}
+                      flex-1 flex items-center justify-center py-3 transition text-black
+                      ${activeTab === tab.key ? 'bg-blue-500 text-white' : 'hover:bg-blue-100'}
                     `}
                   >
                     <tab.icon className="mr-2" />
@@ -515,27 +511,19 @@ const CourseGroupManagementPage: React.FC = () => {
                 ))}
               </div>
 
-              {/* Content based on active tab */}
               {activeTab === 'members' && renderMembersList()}
               {activeTab === 'forums' && renderChatForums()}
               {activeTab === 'assignments' && renderAssignments()}
             </>
           ) : (
             <div className="bg-white p-8 rounded-lg shadow-md text-center">
-              <h3 className="text-xl font-semibold mb-4">Welcome to Course Group Management</h3>
-              <p className="text-gray-600 mb-6">Select an existing group or create a new one to get started</p>
-              <button
-                onClick={() => setShowNewGroupForm(true)}
-                className="btn-primary flex items-center mx-auto"
-              >
-                <Plus className="mr-2" /> Create Your First Group
-              </button>
+              <h3 className="text-xl font-semibold mb-4 text-black">Welcome to Course Group Management</h3>
+              <p className="text-black">Select a group to view details</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* CSS for btn-primary */}
       <style jsx>{`
         .btn-primary {
           background: linear-gradient(to right, #3b82f6, #2563eb);
