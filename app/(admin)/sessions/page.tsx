@@ -27,6 +27,50 @@ interface UpcomingEvent {
   isPublic: boolean;
 }
 
+// Delete Confirmation Modal Component
+interface DeleteConfirmationModalProps {
+  isOpen: boolean;
+  itemToDelete: UpcomingEvent | Activity | null;
+  type: 'event' | 'activity';
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
+  isOpen,
+  itemToDelete,
+  type,
+  onClose,
+  onConfirm,
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
+        <h3 className="text-xl font-semibold text-gray-800 mb-4">Confirm Deletion</h3>
+        <p className="text-gray-600 mb-6">
+          Are you sure you want to delete the {type} "{itemToDelete?.title}"? This action cannot be undone.
+        </p>
+        <div className="flex justify-end space-x-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ClassSchedulePage: React.FC = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -34,12 +78,25 @@ const ClassSchedulePage: React.FC = () => {
   const [newActivity, setNewActivity] = useState({ title: '', time: '', location: '' });
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [newEvent, setNewEvent] = useState<Omit<UpcomingEvent, 'id'>>({
-    title: '', date: format(new Date(), 'yyyy-MM-dd'), time: '', location: '',
-    frequency: 'once', description: '', isPublic: true,
+    title: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    time: '',
+    location: '',
+    frequency: 'once',
+    description: '',
+    isPublic: true,
   });
   const [showEventForm, setShowEventForm] = useState(false);
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
+
+  // Delete modal state
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState<UpcomingEvent | null>(null);
+  const [activityToDelete, setActivityToDelete] = useState<Activity | null>(null);
+
+  // Edit activity state
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
 
   // Check authentication state
   useEffect(() => {
@@ -47,7 +104,7 @@ const ClassSchedulePage: React.FC = () => {
       if (user) {
         setUser(user);
       } else {
-        router.push('/login'); // Redirect to login page if not authenticated
+        router.push('/login');
       }
     });
     return () => unsubscribe();
@@ -60,7 +117,7 @@ const ClassSchedulePage: React.FC = () => {
     const fetchData = async () => {
       // Fetch activities
       const activitiesSnapshot = await getDocs(collection(db, 'activities'));
-      const activitiesData = activitiesSnapshot.docs.map(doc => ({
+      const activitiesData = activitiesSnapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       })) as Activity[];
@@ -68,7 +125,7 @@ const ClassSchedulePage: React.FC = () => {
 
       // Fetch upcoming events
       const eventsSnapshot = await getDocs(collection(db, 'upcomingEvents'));
-      const eventsData = eventsSnapshot.docs.map(doc => ({
+      const eventsData = eventsSnapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       })) as UpcomingEvent[];
@@ -117,8 +174,10 @@ const ClassSchedulePage: React.FC = () => {
     if (!newActivity.title || !newActivity.time || !newActivity.location) return;
 
     const activityColors = [
-      'bg-green-100 text-green-800', 'bg-blue-100 text-blue-800',
-      'bg-purple-100 text-purple-800', 'bg-yellow-100 text-yellow-800',
+      'bg-green-100 text-green-800',
+      'bg-blue-100 text-blue-800',
+      'bg-purple-100 text-purple-800',
+      'bg-yellow-100 text-yellow-800',
     ];
     const randomColor = activityColors[Math.floor(Math.random() * activityColors.length)];
 
@@ -145,27 +204,113 @@ const ClassSchedulePage: React.FC = () => {
     const docRef = await addDoc(collection(db, 'upcomingEvents'), newEventEntry);
     setUpcomingEvents((prev) => [...prev, { ...newEventEntry, id: docRef.id }]);
     setNewEvent({
-      title: '', date: format(new Date(), 'yyyy-MM-dd'), time: '', location: '',
-      frequency: 'once', description: '', isPublic: true,
+      title: '',
+      date: format(new Date(), 'yyyy-MM-dd'),
+      time: '',
+      location: '',
+      frequency: 'once',
+      description: '',
+      isPublic: true,
     });
     setShowEventForm(false);
   };
 
-  // Delete event
-  const handleDeleteEvent = async (eventId: string) => {
-    await deleteDoc(doc(db, 'upcomingEvents', eventId));
-    setUpcomingEvents((prev) => prev.filter(event => event.id !== eventId));
+  // Delete event handlers
+  const openDeleteModal = (event: UpcomingEvent) => {
+    setEventToDelete(event);
+    setIsDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    setIsDeleteModalOpen(false);
+    setEventToDelete(null);
+    setActivityToDelete(null);
+  };
+
+  const confirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
+
+    try {
+      await deleteDoc(doc(db, 'upcomingEvents', eventToDelete.id));
+      setUpcomingEvents((prev) => prev.filter((event) => event.id !== eventToDelete.id));
+      closeDeleteModal();
+    } catch (error) {
+      console.error("Error deleting event:", error);
+    }
+  };
+
+  // Delete activity handlers
+  const openDeleteActivityModal = (activity: Activity) => {
+    setActivityToDelete(activity);
+    setIsDeleteModalOpen(true);
+  };
+
+  const confirmDeleteActivity = async () => {
+    if (!activityToDelete) return;
+
+    try {
+      await deleteDoc(doc(db, 'activities', activityToDelete.id));
+      setActivities((prev) => prev.filter((activity) => activity.id !== activityToDelete.id));
+      closeDeleteModal();
+    } catch (error) {
+      console.error("Error deleting activity:", error);
+    }
+  };
+
+  // Edit activity handlers
+  const startEditingActivity = (activity: Activity) => {
+    setEditingActivity(activity);
+    setNewActivity({
+      title: activity.title,
+      time: activity.time,
+      location: activity.location,
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingActivity(null);
+    setNewActivity({ title: '', time: '', location: '' });
+  };
+
+  const handleUpdateActivity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingActivity || !newActivity.title || !newActivity.time || !newActivity.location) return;
+
+    try {
+      const updatedActivity: Activity = {
+        ...editingActivity,
+        title: newActivity.title,
+        time: newActivity.time,
+        location: newActivity.location,
+        date: editingActivity.date,
+      };
+
+      await updateDoc(doc(db, 'activities', editingActivity.id), {
+        title: newActivity.title,
+        time: newActivity.time,
+        location: newActivity.location,
+      });
+
+      setActivities((prev) =>
+        prev.map((activity) =>
+          activity.id === editingActivity.id ? updatedActivity : activity
+        )
+      );
+      cancelEditing();
+    } catch (error) {
+      console.error("Error updating activity:", error);
+    }
   };
 
   // Toggle event visibility
   const toggleEventVisibility = async (eventId: string) => {
-    const event = upcomingEvents.find(e => e.id === eventId);
+    const event = upcomingEvents.find((e) => e.id === eventId);
     if (!event) return;
 
     const updatedEvent = { ...event, isPublic: !event.isPublic };
     await updateDoc(doc(db, 'upcomingEvents', eventId), { isPublic: !event.isPublic });
-    setUpcomingEvents(prev =>
-      prev.map(e => e.id === eventId ? updatedEvent : e)
+    setUpcomingEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? updatedEvent : e))
     );
   };
 
@@ -177,7 +322,7 @@ const ClassSchedulePage: React.FC = () => {
 
   // Filter activities for selected date
   const selectedDateKey = format(selectedDate, 'yyyy-MM-dd');
-  const selectedActivities = activities.filter(activity => activity.date === selectedDateKey);
+  const selectedActivities = activities.filter((activity) => activity.date === selectedDateKey);
 
   if (!user) return <div>Loading...</div>;
 
@@ -185,26 +330,37 @@ const ClassSchedulePage: React.FC = () => {
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-white">Schedule Activity</h1>
-        
       </div>
 
       {/* Calendar Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="lg:col-span-2 bg-white shadow-lg rounded-lg overflow-hidden">
           <div className="flex justify-between items-center bg-gray-100 p-4">
-            <button onClick={() => changeMonth('prev')} className="text-gray-600 hover:text-gray-800 transition">← Previous</button>
+            <button
+              onClick={() => changeMonth('prev')}
+              className="text-gray-600 hover:text-gray-800 transition"
+            >
+              ← Previous
+            </button>
             <h2 className="text-2xl font-bold text-gray-800">{format(currentMonth, 'MMMM yyyy')}</h2>
-            <button onClick={() => changeMonth('next')} className="text-gray-600 hover:text-gray-800 transition">Next →</button>
+            <button
+              onClick={() => changeMonth('next')}
+              className="text-gray-600 hover:text-gray-800 transition"
+            >
+              Next →
+            </button>
           </div>
           <div className="grid grid-cols-7 gap-2 p-4">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="text-center font-semibold text-gray-600 uppercase text-sm">{day}</div>
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+              <div key={day} className="text-center font-semibold text-gray-600 uppercase text-sm">
+                {day}
+              </div>
             ))}
             {calendarDays.map((day: Date) => {
               const dateKey = format(day, 'yyyy-MM-dd');
               const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
               const isSelected = format(day, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
-              const dayActivities = activities.filter(activity => activity.date === dateKey);
+              const dayActivities = activities.filter((activity) => activity.date === dateKey);
 
               return (
                 <div
@@ -217,12 +373,16 @@ const ClassSchedulePage: React.FC = () => {
                   `}
                 >
                   <div className="flex justify-between items-center mb-2">
-                    <span className={`text-sm font-semibold ${isCurrentMonth ? 'text-gray-800' : 'text-gray-400'}`}>
+                    <span
+                      className={`text-sm font-semibold ${
+                        isCurrentMonth ? 'text-gray-800' : 'text-gray-400'
+                      }`}
+                    >
                       {format(day, 'd')}
                     </span>
                   </div>
                   <div className="space-y-1">
-                    {dayActivities.map(activity => (
+                    {dayActivities.map((activity) => (
                       <div
                         key={activity.id}
                         className={`rounded px-2 py-1 text-xs ${activity.className || 'bg-gray-100'}`}
@@ -230,6 +390,9 @@ const ClassSchedulePage: React.FC = () => {
                         <div className="font-semibold">{activity.title}</div>
                         <div className="text-xs opacity-75">{activity.time}</div>
                         <div className="text-xs opacity-75">{activity.location}</div>
+                        <div className="flex space-x-2 mt-1">
+                          
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -245,23 +408,46 @@ const ClassSchedulePage: React.FC = () => {
             Schedule for {format(selectedDate, 'MMMM d, yyyy')}
           </h3>
           {selectedActivities.length > 0 ? (
-            <ul className="space-y-4 mb-6 ">
-              {selectedActivities.map(activity => (
+            <ul className="space-y-4 mb-6">
+              {selectedActivities.map((activity) => (
                 <li
                   key={activity.id}
                   className={`rounded-lg p-3 ${activity.className || 'bg-gray-100 text-black'}`}
                 >
-                  <div className="font-semibold text-sm text-black">{activity.title}</div>
-                  <div className="text-xs text-black">{activity.time}</div>
-                  <div className="text-xs text-black">{activity.location}</div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="font-semibold text-sm text-black">{activity.title}</div>
+                      <div className="text-xs text-black">{activity.time}</div>
+                      <div className="text-xs text-black">{activity.location}</div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => startEditingActivity(activity)}
+                        className="text-blue-600 hover:text-blue-900 transition text-sm"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => openDeleteActivityModal(activity)}
+                        className="text-red-600 hover:text-red-900 transition text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 </li>
               ))}
             </ul>
           ) : (
             <p className="text-black text-sm mb-6">No activities scheduled for this day.</p>
           )}
-          <h4 className="text-lg font-semibold text-gray-800 mb-3">Add New Activity</h4>
-          <form onSubmit={handleAddActivity} className="space-y-3 text-black">
+          <h4 className="text-lg font-semibold text-gray-800 mb-3">
+            {editingActivity ? 'Edit Activity' : 'Add New Activity'}
+          </h4>
+          <form
+            onSubmit={editingActivity ? handleUpdateActivity : handleAddActivity}
+            className="space-y-3 text-black"
+          >
             <div>
               <label className="block text-sm font-medium text-blue-400">Title</label>
               <input
@@ -291,16 +477,27 @@ const ClassSchedulePage: React.FC = () => {
                 name="location"
                 value={newActivity.location}
                 onChange={handleInputChange}
-                className="mt-1 w-full p-2 border  rounded-lg text-sm"
+                className="mt-1 w-full p-2 border rounded-lg text-sm"
                 placeholder="e.g., online"
               />
             </div>
-            <button
-              type="submit"
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition text-sm"
-            >
-              Add Activity
-            </button>
+            <div className="flex space-x-3">
+              <button
+                type="submit"
+                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition text-sm"
+              >
+                {editingActivity ? 'Update Activity' : 'Add Activity'}
+              </button>
+              {editingActivity && (
+                <button
+                  type="button"
+                  onClick={cancelEditing}
+                  className="flex-1 bg-gray-200 text-gray-800 py-2 rounded-lg hover:bg-gray-300 transition text-sm"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </form>
         </div>
       </div>
@@ -418,22 +615,42 @@ const ClassSchedulePage: React.FC = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Frequency</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Public</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Title
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Date & Time
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Location
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Frequency
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Public
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {upcomingEvents.length > 0 ? (
-                upcomingEvents.map(event => (
+                upcomingEvents.map((event) => (
                   <tr key={event.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{event.title}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.date} at {event.time}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{event.location}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">{event.frequency}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {event.title}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {event.date} at {event.time}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {event.location}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">
+                      {event.frequency}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <button
                         onClick={() => toggleEventVisibility(event.id)}
@@ -446,8 +663,8 @@ const ClassSchedulePage: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <button
-                        onClick={() => handleDeleteEvent(event.id)}
-                        className="text-red-600 hover:text-red-900"
+                        onClick={() => openDeleteModal(event)}
+                        className="text-red-600 hover:text-red-900 transition"
                       >
                         Delete
                       </button>
@@ -465,6 +682,15 @@ const ClassSchedulePage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={isDeleteModalOpen}
+        itemToDelete={eventToDelete || activityToDelete}
+        type={eventToDelete ? 'event' : 'activity'}
+        onClose={closeDeleteModal}
+        onConfirm={eventToDelete ? confirmDeleteEvent : confirmDeleteActivity}
+      />
     </div>
   );
 };

@@ -1,13 +1,144 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import JoditEditor from 'jodit-react';
 import { Save, X, Upload, HelpCircle, Plus, Trash, Loader, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { collection, addDoc, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { v4 as uuidv4 } from 'uuid';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import TextAlign from '@tiptap/extension-text-align';
+import Highlight from '@tiptap/extension-highlight';
+import Underline from '@tiptap/extension-underline';
+import Image from '@tiptap/extension-image';
+import TipTapLink from '@tiptap/extension-link';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import Typography from '@tiptap/extension-typography';
+import { createLowlight } from 'lowlight'; // Import createLowlight
+// Optional: Import specific languages for syntax highlighting
+import javascript from 'highlight.js/lib/languages/javascript';
+import python from 'highlight.js/lib/languages/python';
+import css from 'highlight.js/lib/languages/css';
+
+// Create lowlight instance and register languages
+const lowlight = createLowlight();
+lowlight.register('javascript', javascript);
+lowlight.register('python', python);
+lowlight.register('css', css);
+
+// Custom Toolbar Component for TipTap
+const Toolbar = ({ editor }: { editor: any }) => {
+  if (!editor) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-t-md border-b border-gray-300 dark:border-gray-600">
+      <button
+        onClick={() => editor.chain().focus().toggleBold().run()}
+        className={`p-1 rounded ${editor.isActive('bold') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Bold"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.96-1.7 3.96-3.91 0-1.39-.76-2.62-1.94-3.3zM9 6h4c1.1 0 2 .9 2 2s-.9 2-2 2H9V6zm6 8H9v-4h6c1.1 0 2 .9 2 2s-.9 2-2 2z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+        className={`p-1 rounded ${editor.isActive('italic') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Italic"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4h-8z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+        className={`p-1 rounded ${editor.isActive('underline') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Underline"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+        className={`p-1 rounded ${editor.isActive('heading', { level: 1 }) ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Heading 1"
+      >
+        H1
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+        className={`p-1 rounded ${editor.isActive('heading', { level: 2 }) ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Heading 2"
+      >
+        H2
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleBulletList().run()}
+        className={`p-1 rounded ${editor.isActive('bulletList') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Bullet List"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+        className={`p-1 rounded ${editor.isActive('orderedList') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Ordered List"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+        className={`p-1 rounded ${editor.isActive('codeBlock') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Code Block"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8.7 15.9L4.8 12l3.9-3.9c.39-.39.39-1.01 0-1.4-.39-.39-1.01-.39-1.4 0l-4.59 4.59c-.39.39-.39 1.02 0 1.41l4.59 4.6c.39.39 1.01.39 1.4 0 .39-.39.39-1.01 0-1.4zm6.6-1.4c-.39.39-1.01.39-1.4 0-.39-.39-.39-1.01 0-1.4l3.9-3.9-3.9-3.9c-.39-.39-.39-1.01 0-1.4.39-.39 1.01-.39 1.4 0l4.59 4.59c.39.39.39 1.02 0 1.41l-4.59 4.6z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().toggleLink({ href: prompt('Enter URL') || '' }).run()}
+        className={`p-1 rounded ${editor.isActive('link') ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+        title="Link"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => {
+          const src = prompt('Enter image URL');
+          if (src) editor.chain().focus().setImage({ src }).run();
+        }}
+        className="p-1 rounded bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        title="Image"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+        className="p-1 rounded bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        title="Table"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M3 3v18h18V3H3zm16 2v2h-6V5h6zm-8 0v2H5V5h6zm-8 0h2v2H3V5zm2 4h6v2H5V9zm8 0h6v2h-6V9zm-8 4h6v2H5v-2zm8 0h6v2h-6v-2zm0 4h6v2h-6v-2zm-8 0h6v2H5v-2z" />
+        </svg>
+      </button>
+    </div>
+  );
+};
 
 interface Module {
   id: string;
@@ -60,6 +191,35 @@ export default function CourseManagementPage() {
   const [modal, setModal] = useState<ModalState>({ isOpen: false, status: null, message: '' });
   const [deleteModal, setDeleteModal] = useState<DeleteModalState>({ isOpen: false });
 
+  // Initialize TipTap editor for the current module
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      Highlight,
+      Underline,
+      Image,
+      TipTapLink.configure({ openOnClick: false }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      CodeBlockLowlight.configure({ lowlight }), // Pass lowlight instance
+      Typography,
+    ],
+    content: formData.modules[currentModuleIndex].content,
+    onUpdate: ({ editor }) => {
+      handleModuleContentChange(editor.getHTML(), currentModuleIndex);
+    },
+  });
+
+  // Update editor content when module index changes
+  useEffect(() => {
+    if (editor) {
+      editor.commands.setContent(formData.modules[currentModuleIndex].content);
+    }
+  }, [currentModuleIndex, editor]);
+
   // Fetch existing course data if editing
   useEffect(() => {
     const fetchCourse = async () => {
@@ -104,34 +264,6 @@ export default function CourseManagementPage() {
       return () => clearTimeout(timer);
     }
   }, [modal, router]);
-
-  const editorConfig = {
-    readonly: false,
-    height: 400,
-    toolbarAdaptive: false,
-    buttons: ['bold', 'italic', 'underline', '|', 'ul', 'ol', '|', 'font', 'fontsize', 'brush', 'paragraph', '|', 'image', 'video', 'table', 'link', '|', 'undo', 'redo'],
-    theme: 'default',
-    style: { color: '#000000' },
-    colors: {
-      greyscale: ['#000000', '#434343', '#666666', '#999999', '#B7B7B7', '#CCCCCC', '#D9D9D9', '#EFEFEF', '#F3F3F3', '#FFFFFF'],
-      palette: ['#980000', '#FF0000', '#FF9900', '#FFFF00', '#00F0F0', '#00FFFF', '#4A86E8', '#0000FF', '#9900FF', '#FF00FF'],
-      full: [
-        '#E6B8AF', '#F4CCCC', '#FCE5CD', '#FFF2CC', '#D9EAD3', '#D0E0E3', '#C9DAF8', '#CFE2F3', '#D9D2E9', '#EAD1DC',
-        '#DD7E6B', '#EA9999', '#F9CB9C', '#FFE599', '#B6D7A8', '#A2C4C9', '#A4C2F4', '#9FC5E8', '#B4A7D6', '#D5A6BD',
-        '#CC4125', '#E06666', '#F6B26B', '#FFD966', '#93C47D', '#76A5AF', '#6D9EEB', '#6FA8DC', '#8E7CC3', '#C27BA0',
-        '#A61C00', '#CC0000', '#E69138', '#F1C232', '#6AA84F', '#45818E', '#3C78D8', '#3D85C6', '#674EA7', '#A64D79',
-        '#85200C', '#990000', '#B45F06', '#BF9000', '#38761D', '#134F5C', '#1155CC', '#0B5394', '#351C75', '#741B47',
-        '#5B0F00', '#660000', '#783F04', '#7F6000', '#274E13', '#0C343D', '#1C4587', '#073763', '#20124D', '#4C1130',
-      ],
-    },
-    defaultStyle: { color: '#000000' },
-    iframe: false,
-    css: `
-      .jodit-container { color: #000000 !important; }
-      .jodit-wysiwyg { color: #000000 !important; }
-      .jodit-wysiwyg p, .jodit-wysiwyg div, .jodit-wysiwyg span, .jodit-wysiwyg a { color: #000000 !important; }
-    `,
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -256,7 +388,7 @@ export default function CourseManagementPage() {
       const courseData = {
         ...formData,
         thumbnail: thumbnailUrl,
-        createdBy: formData.instructor, // Use instructor name as identifier
+        createdBy: formData.instructor,
         updatedAt: serverTimestamp(),
         createdAt: formData.createdAt || serverTimestamp(),
       };
@@ -273,14 +405,13 @@ export default function CourseManagementPage() {
         const courseRef = await addDoc(collection(db, 'courses'), courseData);
         newCourseId = courseRef.id;
 
-        // Create a corresponding group in Firestore
         const groupData = {
           name: courseData.title,
           description: `Group for ${courseData.title}`,
           courseId: newCourseId,
           members: [
             {
-              id: uuidv4(), // Generate unique ID for instructor
+              id: uuidv4(),
               name: courseData.instructor,
               email: `${courseData.instructor.toLowerCase().replace(/\s+/g, '.')}@example.com`,
               role: 'Instructor',
@@ -293,7 +424,7 @@ export default function CourseManagementPage() {
               title: 'General Discussion',
               description: 'Course-wide chat for general topics',
               memberCount: 1,
-              lastMessageAt: new Date(), // Use client-side timestamp
+              lastMessageAt: new Date(),
               messages: [],
             },
           ],
@@ -473,29 +604,35 @@ export default function CourseManagementPage() {
               <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-md text-sm">
                 <h4 className="font-semibold mb-2">Editor Tips:</h4>
                 <ul className="list-disc pl-5 space-y-1">
-                  <li>Use the formatting toolbar to style your content</li>
-                  <li>Add images and videos using the media buttons</li>
-                  <li>Create tables to organize information</li>
-                  <li>Use headings to structure your content</li>
+                  <li>Use the toolbar to format text (bold, italic, headings)</li>
+                  <li>Add images by entering a URL</li>
+                  <li>Create tables to organize data</li>
+                  <li>Use code blocks for code snippets</li>
+                  <li>Add links by selecting text and entering a URL</li>
                 </ul>
               </div>
             )}
-            <div className="black-text-editor">
-              <JoditEditor
-                value={formData.modules[currentModuleIndex].content}
-                config={editorConfig}
-                onBlur={(content) => handleModuleContentChange(content, currentModuleIndex)}
+            <div className="border border-gray-300 dark:border-gray-600 rounded-md">
+              <Toolbar editor={editor} />
+              <EditorContent
+                editor={editor}
+                className="prose prose-sm max-w-none p-4 min-h-[400px] bg-white dark:bg-white text-black focus:outline-none"
               />
             </div>
             <style jsx global>{`
-              .jodit-wysiwyg { color: #000000 !important; }
-              .jodit-wysiwyg p, .jodit-wysiwyg div, .jodit-wysiwyg span, .jodit-wysiwyg a,
-              .jodit-wysiwyg h1, .jodit-wysiwyg h2, .jodit-wysiwyg h3, .jodit-wysiwyg h4,
-              .jodit-wysiwyg h5, .jodit-wysiwyg h6, .jodit-wysiwyg li, .jodit-wysiwyg td,
-              .jodit-wysiwyg th, .jodit-wysiwyg pre, .jodit-wysiwyg code {
+              .prose {
                 color: #000000 !important;
               }
-              .dark .jodit-wysiwyg { background-color: white; color: #000000 !important; }
+              .prose p, .prose div, .prose span, .prose a,
+              .prose h1, .prose h2, .prose h3, .prose h4,
+              .prose h5, .prose h6, .prose li, .prose td,
+              .prose th, .prose pre, .prose code {
+                color: #000000 !important;
+              }
+              .dark .prose {
+                background-color: white !important;
+                color: #000000 !important;
+              }
             `}</style>
           </div>
         </div>
@@ -676,11 +813,11 @@ export default function CourseManagementPage() {
                 <div className="sm:flex sm:items-start">
                   <div className={`mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full sm:mx-0 sm:h-10 sm:w-10 ${modal.status === 'success' ? 'bg-green-100' : 'bg-red-100'}`}>
                     {modal.status === 'success' ? (
-                      <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 24 24" stroke="currentColor">
+                      <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                       </svg>
                     ) : (
-                      <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 24 24" stroke="currentColor">
+                      <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     )}
