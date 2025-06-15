@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 
@@ -14,11 +14,13 @@ interface Course {
   duration: string;
   progress: number;
   thumbnail: string;
-  category?: string;
+  category: string;
+  groupId?: string;
 }
 
 export default function CoursesPage() {
   const [courses, setCourses] = useState<Course[]>([]);
+  const [enrollmentStatus, setEnrollmentStatus] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState('All');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +33,12 @@ export default function CoursesPage() {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (!currentUser) {
-        // Optionally redirect to login if needed
-        // router.push('/login');
+      if (currentUser && courses.length > 0) {
+        checkEnrollmentStatus(currentUser.uid, courses);
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [courses]);
 
   // Fetch courses from Firestore
   useEffect(() => {
@@ -46,21 +47,24 @@ export default function CoursesPage() {
       try {
         const coursesCollection = collection(db, 'courses');
         const coursesSnapshot = await getDocs(coursesCollection);
-        const coursesList = coursesSnapshot.docs.map((doc) => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            title: data.title || 'Untitled Course',
-            instructor: data.instructor || 'Unknown Instructor',
-            level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
-            duration: data.duration || 'Unknown',
-            progress: typeof data.progress === 'number' ? data.progress : 0,
-            thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
-            category: data.category || 'Uncategorized',
-          } as Course;
-        });
+        const coursesList: Course[] = coursesSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          title: doc.data().title || 'Untitled Course',
+          instructor: doc.data().instructor || 'Unknown Instructor',
+          level: ['Beginner', 'Intermediate', 'Advanced'].includes(doc.data().level)
+            ? doc.data().level
+            : 'Beginner',
+          duration: doc.data().duration || 'Unknown',
+          progress: typeof doc.data().progress === 'number' ? doc.data().progress : 0,
+          thumbnail: doc.data().thumbnail || '/api/placeholder/400/250?text=No+Image',
+          category: doc.data().category || 'Uncategorized',
+          groupId: doc.data().groupId || null,
+        }));
         setCourses(coursesList);
         setError(null);
+        if (user) {
+          checkEnrollmentStatus(user.uid, coursesList);
+        }
       } catch (err: any) {
         console.error('Error fetching courses:', err);
         setError(`Failed to load courses: ${err.message || 'Unknown error'}`);
@@ -69,42 +73,48 @@ export default function CoursesPage() {
       }
     };
     fetchCourses();
-  }, []);
+  }, [user]);
 
-  // Filter courses by category
+  // Check enrollment status for all courses
+  const checkEnrollmentStatus = async (userId: string, courses: Course[]) => {
+    try {
+      const status: Record<string, boolean> = {};
+      for (const course of courses) {
+        const enrollmentRef = doc(db, 'users', userId, 'enrollments', course.id);
+        const enrollmentSnap = await getDoc(enrollmentRef);
+        status[course.id] = enrollmentSnap.exists();
+      }
+      setEnrollmentStatus(status);
+    } catch (err) {
+      console.error('Error checking enrollment status:', err);
+    }
+  };
+
+  // Filter and paginate courses
   const filteredCourses = filter === 'All' ? courses : courses.filter((course) => course.category === filter);
-
-  // Pagination logic
   const totalPages = Math.ceil(filteredCourses.length / coursesPerPage);
-  const indexOfLastCourse = currentPage * coursesPerPage;
-  const indexOfFirstCourse = indexOfLastCourse - coursesPerPage;
-  const currentCourses = filteredCourses.slice(indexOfFirstCourse, indexOfLastCourse);
+  const currentCourses = filteredCourses.slice(
+    (currentPage - 1) * coursesPerPage,
+    currentPage * coursesPerPage
+  );
 
-  // Change page
   const paginate = (pageNumber: number) => {
     if (pageNumber >= 1 && pageNumber <= totalPages) {
       setCurrentPage(pageNumber);
     }
   };
 
-  // Generate page numbers for display
   const getPageNumbers = () => {
-    const pageNumbers = [];
-    const maxPagesToShow = 5; // Show up to 5 page numbers at a time
+    const maxPagesToShow = 5;
     let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
     let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-
     if (endPage - startPage + 1 < maxPagesToShow) {
       startPage = Math.max(1, endPage - maxPagesToShow + 1);
     }
-
-    for (let i = startPage; i <= endPage; i++) {
-      pageNumbers.push(i);
-    }
-    return pageNumbers;
+    return Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
   };
 
-  const categories = ['All', ...new Set(courses.map((course) => course.category || 'Uncategorized'))];
+  const categories = ['All', ...new Set(courses.map((course) => course.category))];
 
   if (loading) {
     return (
@@ -118,13 +128,13 @@ export default function CoursesPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-800 dark:text-white">My Courses</h1>
-        <div className="flex-1 flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap gap-2 justify-end">
           {categories.map((category) => (
             <button
               key={category}
               onClick={() => {
                 setFilter(category);
-                setCurrentPage(1); // Reset to page 1 when changing filter
+                setCurrentPage(1);
               }}
               className={`px-4 py-2 rounded-full transition-colors duration-200 ${
                 filter === category
@@ -142,7 +152,7 @@ export default function CoursesPage() {
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {currentCourses.map((course) => (
-          <Link key={course.id} href={`/courses/${course.id}`} className="group">
+          <div key={course.id} className="group">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl transform hover:-translate-y-2 hover:scale-105">
               <div className="relative">
                 <img src={course.thumbnail} alt={course.title} className="w-full h-48 object-cover" />
@@ -151,33 +161,57 @@ export default function CoursesPage() {
                 </div>
               </div>
               <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">{course.title}</h2>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">{course.instructor}</span>
-                  </div>
+                <Link href={`/courses/${course.id}`}>
+                  <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2 hover:underline">{course.title}</h2>
+                </Link>
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">{course.instructor}</span>
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.duration}</span>
                 </div>
+                {course.groupId && (
+                  <div className="mt-2">
+                    <Link href="/groups" className="text-blue-600 hover:underline text-sm">
+                      Join Study Group
+                    </Link>
+                  </div>
+                )}
                 {user && (
                   <div className="mt-4">
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 rounded-full h-2"
-                        style={{ width: `${course.progress}%` }}
-                      ></div>
-                    </div>
-                    <div className="flex justify-between mt-2">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">Progress</span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">{course.progress}%</span>
-                    </div>
+                    {enrollmentStatus[course.id] ? (
+                      <>
+                        <Link href={`/courses/${course.id}/learn`}>
+                          <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                            Resume Course
+                          </button>
+                        </Link>
+                        <div className="mt-2">
+                          <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 rounded-full h-2"
+                              style={{ width: `${course.progress}%` }}
+                            ></div>
+                          </div>
+                          <div className="flex justify-between mt-2">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">Progress</span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{course.progress}%</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <Link href={`/courses/${course.id}`}>
+                        <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                          Enroll Now
+                        </button>
+                      </Link>
+                    )}
                   </div>
                 )}
               </div>
             </div>
-          </Link>
+          </div>
         ))}
       </div>
-      {currentCourses.length === 0 && !loading && (
+      {!loading && currentCourses.length === 0 && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <p className="text-xl">No courses found in this category.</p>
         </div>

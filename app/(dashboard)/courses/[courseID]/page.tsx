@@ -1,20 +1,20 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, addDoc, arrayUnion, increment } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/lib/firebase';
-import { ArrowLeft, ChevronDown, ChevronUp, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Clock, Users, Star, CheckCircle, PlayCircle, BookOpen, Award, Shield, Calendar, Globe, Download } from 'lucide-react';
 import Link from 'next/link';
 import parse from 'html-react-parser';
+import { toast } from 'react-hot-toast';
 
-// Define interfaces
 interface Module {
   id: string;
   title: string;
   content: string;
-  completed?: boolean;
+  duration?: string;
 }
 
 interface Course {
@@ -24,159 +24,98 @@ interface Course {
   description: string;
   level: 'Beginner' | 'Intermediate' | 'Advanced';
   duration: string;
-  progress: number;
+  price: number;
+  originalPrice?: number;
   thumbnail: string;
   category: string;
   modules: Module[];
+  rating: number;
+  totalStudents: number;
+  lastUpdated: string;
+  language: string;
+  certificate: boolean;
+  requirements: string[];
+  whatYouLearn: string[];
+  targetAudience: string[];
+  instructor_bio?: string;
+  instructor_image?: string;
+  preview_video?: string;
 }
 
-interface UserProgress {
-  readModules: Record<string, boolean>;
-  scrollPositions: Record<string, number>;
-  lastReadDate: Date;
+interface Enrollment {
+  courseId: string;
+  userId: string;
+  enrolledAt: Date;
+  status: 'active' | 'completed' | 'paused';
 }
 
-export default function CourseDetailPage() {
+interface Member {
+  id: string;
+  name: string;
+  email: string;
+  role: 'Student' | 'Instructor' | 'Teaching Assistant';
+  profileImage?: string;
+}
+
+interface ChatForum {
+  id: string;
+  title: string;
+  description: string;
+  memberCount: number;
+  lastMessageAt: Date;
+}
+
+interface CourseGroup {
+  id: string;
+  name: string;
+  description: string;
+  courseId: string;
+  members: Member[];
+  chatForums: ChatForum[];
+  assignments: any[];
+  createdAt?: Date;
+}
+
+export default function CourseEnrollmentPage() {
   const router = useRouter();
   const params = useParams();
   const courseId = params.courseId as string;
   const [course, setCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(true);
+  const [enrolling, setEnrolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
-  const [userProgress, setUserProgress] = useState<UserProgress>({
-    readModules: {},
-    scrollPositions: {},
-    lastReadDate: new Date()
-  });
-  const [savingProgress, setSavingProgress] = useState(false);
-  const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [isEnrolled, setIsEnrolled] = useState(false);
+  const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
+  const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
+  const [authLoading, setAuthLoading] = useState(true);
 
   // Handle authentication state
   useEffect(() => {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      setAuthLoading(false);
       if (currentUser && courseId) {
-        loadUserProgress(currentUser.uid, courseId);
+        checkEnrollmentStatus(currentUser.uid, courseId);
       }
     });
     return () => unsubscribe();
   }, [courseId]);
 
-  // Load user's progress from Firestore
-  const loadUserProgress = async (userId: string, courseId: string) => {
+  // Check enrollment status
+  const checkEnrollmentStatus = async (userId: string, courseId: string) => {
     try {
-      const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
-      const progressSnap = await getDoc(progressRef);
-      
-      if (progressSnap.exists()) {
-        const data = progressSnap.data();
-        setUserProgress({
-          readModules: data.readModules || {},
-          scrollPositions: data.scrollPositions || {},
-          lastReadDate: data.lastReadDate ? data.lastReadDate.toDate() : new Date()
-        });
-      }
+      const enrollmentRef = doc(db, 'users', userId, 'enrollments', courseId);
+      const enrollmentSnap = await getDoc(enrollmentRef);
+      setIsEnrolled(enrollmentSnap.exists());
     } catch (err) {
-      console.error('Error loading user progress:', err);
+      console.error('Error checking enrollment:', err);
     }
   };
 
-  // Save user's progress to Firestore
-  const saveUserProgress = async (updatedProgress: UserProgress) => {
-    if (!user || !courseId || savingProgress) return;
-    
-    setSavingProgress(true);
-    try {
-      const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
-      await updateDoc(progressRef, {
-        readModules: updatedProgress.readModules,
-        scrollPositions: updatedProgress.scrollPositions,
-        lastReadDate: new Date(),
-        courseId: courseId,
-        userId: user.uid
-      });
-      
-      // Also update the overall course progress in the courses collection
-      if (course) {
-        const totalModules = course.modules.length;
-        const completedModules = Object.values(updatedProgress.readModules).filter(Boolean).length;
-        const newProgressPercentage = totalModules > 0 ? Math.round((completedModules / totalModules) * 100) : 0;
-        
-        const courseRef = doc(db, 'courses', courseId);
-        await updateDoc(courseRef, {
-          progress: newProgressPercentage
-        });
-        
-        setCourse(prev => prev ? {...prev, progress: newProgressPercentage} : null);
-      }
-    } catch (err) {
-      console.error('Error saving progress:', err);
-    } finally {
-      setSavingProgress(false);
-    }
-  };
-
-  // Track scrolling within module content
-  const handleScroll = (moduleId: string) => {
-    if (!contentRefs.current[moduleId]) return;
-    
-    const element = contentRefs.current[moduleId];
-    const scrollHeight = element.scrollHeight;
-    const scrollTop = element.scrollTop;
-    const clientHeight = element.clientHeight;
-    const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
-    
-    // Consider module read if scrolled 90% through
-    if (scrollPercentage >= 0.9) {
-      const updatedReadModules = {
-        ...userProgress.readModules,
-        [moduleId]: true
-      };
-      
-      setUserProgress(prev => {
-        const updated = {
-          ...prev,
-          readModules: updatedReadModules,
-          scrollPositions: {
-            ...prev.scrollPositions,
-            [moduleId]: scrollTop
-          },
-          lastReadDate: new Date()
-        };
-        
-        // Debounce saving to reduce database writes
-        const timeoutId = setTimeout(() => {
-          saveUserProgress(updated);
-        }, 2000);
-        
-        return updated;
-      });
-    } else {
-      // Just update scroll position without marking as read
-      setUserProgress(prev => ({
-        ...prev,
-        scrollPositions: {
-          ...prev.scrollPositions,
-          [moduleId]: scrollTop
-        },
-        lastReadDate: new Date()
-      }));
-    }
-  };
-
-  // Restore scroll position when expanding a module
-  useEffect(() => {
-    Object.entries(expandedModules).forEach(([moduleId, isExpanded]) => {
-      if (isExpanded && contentRefs.current[moduleId] && userProgress.scrollPositions[moduleId]) {
-        contentRefs.current[moduleId].scrollTop = userProgress.scrollPositions[moduleId];
-      }
-    });
-  }, [expandedModules, userProgress.scrollPositions]);
-
-  // Fetch course details from Firestore
+  // Fetch course details
   useEffect(() => {
     const fetchCourse = async () => {
       if (!courseId) {
@@ -184,42 +123,36 @@ export default function CourseDetailPage() {
         setLoading(false);
         return;
       }
-
       setLoading(true);
       try {
         const docRef = doc(db, 'courses', courseId);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          const courseData = {
+          setCourse({
             id: docSnap.id,
             title: data.title || 'Untitled Course',
             instructor: data.instructor || 'Unknown Instructor',
             description: data.description || 'No description available.',
             level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
             duration: data.duration || 'Unknown',
-            progress: typeof data.progress === 'number' ? data.progress : 0,
+            price: data.price || 0,
+            originalPrice: data.originalPrice,
             thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
             category: data.category || 'Uncategorized',
-            modules: Array.isArray(data.modules)
-              ? data.modules.map((m: any) => ({
-                  id: m.id || crypto.randomUUID(),
-                  title: m.title || 'Untitled Module',
-                  content: m.content || '',
-                  completed: false
-                }))
-              : [],
-          };
-          
-          setCourse(courseData);
-          
-          // Initialize expanded state for all modules (default to expanded)
-          const initialExpandedState: Record<string, boolean> = {};
-          courseData.modules.forEach(module => {
-            initialExpandedState[module.id] = true;
+            modules: Array.isArray(data.modules) ? data.modules : [],
+            rating: data.rating || 4.5,
+            totalStudents: data.totalStudents || 0,
+            lastUpdated: data.lastUpdated || 'Recently',
+            language: data.language || 'English',
+            certificate: data.certificate || false,
+            requirements: data.requirements || [],
+            whatYouLearn: data.whatYouLearn || [],
+            targetAudience: data.targetAudience || [],
+            instructor_bio: data.instructor_bio,
+            instructor_image: data.instructor_image,
+            preview_video: data.preview_video,
           });
-          setExpandedModules(initialExpandedState);
-          
           setError(null);
         } else {
           setError('Course not found');
@@ -231,52 +164,122 @@ export default function CourseDetailPage() {
         setLoading(false);
       }
     };
-
     fetchCourse();
   }, [courseId]);
 
-  const toggleModule = (moduleId: string) => {
-    setExpandedModules(prev => ({
-      ...prev,
-      [moduleId]: !prev[moduleId]
-    }));
+  // Handle enrollment
+  const handleEnrollment = async () => {
+    if (!user || !course) {
+      router.push('/login');
+      return;
+    }
+    setEnrolling(true);
+    try {
+      const enrollmentData: Enrollment = {
+        courseId: course.id,
+        userId: user.uid,
+        enrolledAt: new Date(),
+        status: 'active',
+      };
+      const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', course.id);
+      await setDoc(enrollmentRef, enrollmentData);
+
+      const progressRef = doc(db, 'users', user.uid, 'courseProgress', course.id);
+      await setDoc(progressRef, {
+        readModules: {},
+        scrollPositions: {},
+        lastReadDate: new Date(),
+        courseId: course.id,
+        userId: user.uid,
+      });
+
+      const courseRef = doc(db, 'courses', course.id);
+      await updateDoc(courseRef, { totalStudents: increment(1) });
+
+      const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', course.id));
+      const groupsSnapshot = await getDocs(groupsQuery);
+      let groupId: string | null = null;
+      let groupRef;
+
+      if (groupsSnapshot.empty) {
+        const newGroup: Omit<CourseGroup, 'id'> = {
+          name: `${course.title} Study Group`,
+          description: `Study group for ${course.title}`,
+          courseId: course.id,
+          members: [{
+            id: user.uid,
+            name: user.displayName || 'Anonymous User',
+            email: user.email || '',
+            role: 'Student',
+            profileImage: user.photoURL || undefined,
+          }],
+          chatForums: [],
+          assignments: [],
+          createdAt: new Date(),
+        };
+        const newGroupRef = await addDoc(collection(db, 'groups'), newGroup);
+        groupId = newGroupRef.id;
+        groupRef = newGroupRef;
+        await addDoc(collection(db, 'groups', groupId, 'chatForums'), {
+          id: '1',
+          title: 'General Discussion',
+          description: 'General discussion for the course',
+          memberCount: 1,
+          lastMessageAt: new Date(),
+        });
+      } else {
+        groupId = groupsSnapshot.docs[0].id;
+        groupRef = doc(db, 'groups', groupId);
+        const groupData = groupsSnapshot.docs[0].data() as CourseGroup;
+        const userAlreadyMember = groupData.members.some((member) => member.id === user.uid);
+        if (!userAlreadyMember) {
+          await updateDoc(groupRef, {
+            members: arrayUnion({
+              id: user.uid,
+              name: user.displayName || 'Anonymous User',
+              email: user.email || '',
+              role: 'Student',
+              profileImage: user.photoURL || undefined,
+            }),
+          });
+          const forumsQuery = query(collection(db, 'groups', groupId, 'chatForums'));
+          const forumsSnapshot = await getDocs(forumsQuery);
+          for (const forumDoc of forumsSnapshot.docs) {
+            const forumRef = doc(db, 'groups', groupId, 'chatForums', forumDoc.id);
+            await updateDoc(forumRef, { memberCount: increment(1) });
+          }
+        }
+      }
+
+      setIsEnrolled(true);
+      setEnrollmentSuccess(true);
+      setError(null);
+      toast.success('Enrolled successfully and added to course group!');
+    } catch (err: any) {
+      console.error('Enrollment error:', err);
+      setError(`Failed to enroll: ${err.message || 'Unknown error'}`);
+      toast.error(`Failed to enroll: ${err.message || 'Unknown error'}`);
+    } finally {
+      setEnrolling(false);
+    }
   };
 
-  // Calculate overall progress
-  const calculateProgress = () => {
-    if (!course) return 0;
-    const totalModules = course.modules.length;
-    if (totalModules === 0) return 0;
-    
-    const completedModules = course.modules.filter(module => 
-      userProgress.readModules[module.id]
-    ).length;
-    
-    return Math.round((completedModules / totalModules) * 100);
+  // Calculate total duration
+  const calculateTotalDuration = () => {
+    if (!course?.modules) return course?.duration || 'Unknown';
+    let totalMinutes = 0;
+    course.modules.forEach((module) => {
+      const match = module.duration?.match(/(\d+)/);
+      if (match) totalMinutes += parseInt(match[1]);
+    });
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   };
 
-  // Create a manual way to mark a module as read/unread
-  const toggleModuleRead = (moduleId: string) => {
-    const isCurrentlyRead = userProgress.readModules[moduleId];
-    
-    const updatedReadModules = {
-      ...userProgress.readModules,
-      [moduleId]: !isCurrentlyRead
-    };
-    
-    const updatedProgress = {
-      ...userProgress,
-      readModules: updatedReadModules,
-      lastReadDate: new Date()
-    };
-    
-    setUserProgress(updatedProgress);
-    saveUserProgress(updatedProgress);
-  };
-
-  if (loading) {
+  if (loading || authLoading) {
     return (
-      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-screen">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
       </div>
     );
@@ -284,145 +287,315 @@ export default function CourseDetailPage() {
 
   if (error || !course) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-          {error || 'Course not found'}
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+        <div className="container mx-auto px-4">
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error || 'Course not found'}
+          </div>
+          <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
+            <ArrowLeft size={18} className="mr-2" />
+            Back to Courses
+          </Link>
         </div>
-        <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
-          <ArrowLeft size={18} className="mr-2" />
-          Back to Courses
-        </Link>
       </div>
     );
   }
 
-  const currentProgress = calculateProgress();
-
   return (
-    <div className="container mx-auto px-4 py-8">
-      <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800 mb-6">
-        <ArrowLeft size={18} className="mr-2" />
-        Back to Courses
-      </Link>
-
-      {/* Course Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-        <div className="md:flex">
-          <img
-            src={course.thumbnail}
-            alt={course.title}
-            className="w-full md:w-1/3 h-64 object-cover"
-          />
-          <div className="p-6 flex-1">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-2">{course.title}</h1>
-            <p className="text-gray-600 dark:text-gray-300 mb-4">{course.description}</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Instructor:</span>
-                <span className="ml-2 text-gray-800 dark:text-white">{course.instructor}</span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Level:</span>
-                <span className={`ml-2 px-2 py-1 rounded-full text-xs 
-                  ${course.level === 'Beginner' ? 'bg-green-100 text-green-800' : 
-                    course.level === 'Intermediate' ? 'bg-blue-100 text-blue-800' : 
-                    'bg-purple-100 text-purple-800'}`}>
-                  {course.level}
-                </span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Duration:</span>
-                <span className="ml-2 text-gray-800 dark:text-white">{course.duration}</span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Category:</span>
-                <span className="ml-2 text-gray-800 dark:text-white">{course.category}</span>
-              </div>
-            </div>
-            {user && (
-              <div className="mt-6">
-                <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 rounded-full h-2 transition-all duration-700"
-                    style={{ width: `${currentProgress}%` }}
-                  ></div>
-                </div>
-                <div className="flex justify-between mt-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Progress</span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">{currentProgress}%</span>
-                </div>
-              </div>
-            )}
-          </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="bg-white dark:bg-gray-800 shadow-sm">
+        <div className="container mx-auto px-4 py-4">
+          <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
+            <ArrowLeft size={18} className="mr-2" />
+            Back to Courses
+          </Link>
         </div>
       </div>
 
-      {/* Modules Section */}
-      <div className="mt-8">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">Modules</h2>
-        {course.modules.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400">No modules available for this course.</p>
-        ) : (
-          <div className="space-y-6">
-            {course.modules.map((module) => (
-              <div
-                key={module.id}
-                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden"
-              >
-                <div 
-                  className="px-6 py-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
-                  onClick={() => toggleModule(module.id)}
-                >
-                  <div className="flex items-center">
-                    <h3 className="text-xl font-semibold text-gray-800 dark:text-white">
-                      {module.title}
-                    </h3>
-                    {userProgress.readModules[module.id] && (
-                      <CheckCircle 
-                        className="ml-2 text-green-500" 
-                        size={18} 
-                      />
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <button 
-                      className={`mr-4 text-sm px-3 py-1 rounded-full ${
-                        userProgress.readModules[module.id] 
-                          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' 
-                          : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
-                      }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleModuleRead(module.id);
-                      }}
-                    >
-                      {userProgress.readModules[module.id] ? 'Mark Unread' : 'Mark Read'}
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden mb-8">
+              <div className="relative">
+                <img src={course.thumbnail} alt={course.title} className="w-full h-64 object-cover" />
+                {course.preview_video && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <button className="bg-black bg-opacity-50 rounded-full p-4 hover:bg-opacity-70 transition-opacity">
+                      <PlayCircle className="text-white" size={48} />
                     </button>
-                    
-                    {expandedModules[module.id] ? 
-                      <ChevronUp className="text-gray-500 dark:text-gray-400" size={20} /> : 
-                      <ChevronDown className="text-gray-500 dark:text-gray-400" size={20} />
-                    }
+                  </div>
+                )}
+              </div>
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm text-blue-600 font-medium">{course.category}</span>
+                  <span className={`px-2 py-1 rounded-full text-xs ${
+                    course.level === 'Beginner' ? 'bg-green-100 text-green-800' :
+                    course.level === 'Intermediate' ? 'bg-blue-100 text-blue-800' :
+                    'bg-purple-100 text-purple-800'
+                  }`}>
+                    {course.level}
+                  </span>
+                </div>
+                <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-4">{course.title}</h1>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">{course.description}</p>
+                <div className="flex items-center gap-6 text-sm text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-1">
+                    <Star className="text-yellow-500" size={16} />
+                    <span>{course.rating}</span>
+                  </div>
+                  <p>{course.totalStudents.toLocaleString()} students</p>
+                  <div className="flex items-center gap-1">
+                    <Clock size={16} />
+                    <span>{calculateTotalDuration()}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Calendar size={16} />
+                    <span>Updated {course.lastUpdated}</span>
                   </div>
                 </div>
-                
-                {expandedModules[module.id] && (
-                  <div className="px-6 pb-6">
-                    <div 
-                      ref={el => { contentRefs.current[module.id] = el; }}
-                      onScroll={() => handleScroll(module.id)}
-                      className="prose dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 max-h-96 overflow-y-auto p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+              <div className="border-b border-gray-200 dark:border-b-gray-600">
+                <nav className="flex">
+                  {['overview', 'curriculum', 'instructor', 'reviews'].map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab as any)}
+                      className={`px-6 py-4 text-sm font-medium capitalize ${
+                        activeTab === tab
+                          ? 'text-blue-600 border-b-2 border-blue-600'
+                          : 'text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300'
+                      }`}
                     >
-                      {parse(module.content || '<p>No content available.</p>')}
+                      {tab}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+              <div className="p-6">
+                {activeTab === 'overview' && (
+                  <div className="space-y-8">
+                    {course.whatYouLearn.length > 0 && (
+                      <div>
+                        <h3 className="text-xl font-semibold mb-4">What you'll learn</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {course.whatYouLearn.map((item, index) => (
+                            <div key={index} className="flex items-start gap-3">
+                              <CheckCircle className="text-green-500 mt-1 flex-shrink-0" size={16} />
+                              <span className="text-gray-700 dark:text-gray-300">{item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {course.requirements.length > 0 && (
+                      <div>
+                        <h3 className="text-xl font-semibold mb-4">Requirements</h3>
+                        <ul className="list-disc list-inside space-y-2 text-gray-700 dark:text-gray-300">
+                          {course.requirements.map((req, index) => (
+                            <li key={index}>{req}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {course.targetAudience.length > 0 && (
+                      <div>
+                        <h3 className="text-xl font-semibold mb-4">Who this course is for</h3>
+                        <ul className="list-disc list-inside space-y-2 text-gray-700 dark:text-gray-300">
+                          {course.targetAudience.map((audience, index) => (
+                            <li key={index}>{audience}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {activeTab === 'curriculum' && (
+                  <div>
+                    <h3 className="text-xl font-semibold mb-4">Course Curriculum ({course.modules.length} modules)</h3>
+                    <div className="space-y-4">
+                      {course.modules.map((module, index) => (
+                        <div key={module.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-gray-500 dark:text-gray-400">{index + 1}.</span>
+                            <BookOpen size={16} className="text-gray-400" />
+                            <span className="font-medium text-gray-800 dark:text-white">{module.title}</span>
+                            {module.duration && (
+                              <span className="text-sm text-gray-500 dark:text-gray-400 ml-auto">{module.duration}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {activeTab === 'instructor' && (
+                  <div>
+                    <div className="flex items-start gap-4 mb-6">
+                      <img
+                        src={course.instructor_image || '/api/placeholder/80/80?text=Instructor'}
+                        alt={course.instructor}
+                        className="w-20 h-20 rounded-full object-cover"
+                      />
+                      <div>
+                        <h3 className="text-xl font-semibold text-gray-800 dark:text-white">{course.instructor}</h3>
+                        <p className="text-gray-600 dark:text-gray-300 text-sm">Course Instructor</p>
+                      </div>
+                    </div>
+                    {course.instructor_bio && (
+                      <div className="prose dark:prose-invert max-w-none">{parse(course.instructor_bio)}</div>
+                    )}
+                  </div>
+                )}
+                {activeTab === 'reviews' && (
+                  <div>
+                    <h3 className="text-xl font-semibold mb-4">Student Reviews</h3>
+                    <div className="text-center py-8">
+                      <p className="text-gray-500 dark:text-gray-400">Reviews will be available after enrollment</p>
                     </div>
                   </div>
                 )}
               </div>
-            ))}
+            </div>
           </div>
-        )}
+
+          <div className="lg:col-span-1">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 sticky top-8">
+              <div className="mb-6">
+                <div className="flex items-center gap-3 mb-2">
+                  {course.originalPrice && course.originalPrice > course.price && (
+                    <span className="text-2xl font-bold text-gray-400 line-through">${course.originalPrice}</span>
+                  )}
+                  <span className="text-3xl font-bold text-gray-800 dark:text-white">
+                    {course.price === 0 ? 'Free' : `$${course.price}`}
+                  </span>
+                </div>
+                {course.originalPrice && course.originalPrice > course.price && (
+                  <span className="text-sm text-red-600 font-medium">
+                    {Math.round((1 - course.price / course.originalPrice) * 100)}% off
+                  </span>
+                )}
+              </div>
+              {isEnrolled ? (
+                <Link href={`/courses/${course.id}/learn`}>
+                  <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4">
+                    Resume Course
+                  </button>
+                </Link>
+              ) : (
+                <button
+                  onClick={() => setShowEnrollmentModal(true)}
+                  disabled={enrolling || authLoading}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {enrolling ? 'Enrolling...' : authLoading ? 'Loading...' : 'Enroll Now'}
+                </button>
+              )}
+              {error && (
+                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">{error}</div>
+              )}
+              <p className="text-center text-sm text-gray-500 dark:text-gray-400 mb-6">30-day money-back guarantee</p>
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 dark:text-white">This course includes:</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Clock size={16} className="text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">{calculateTotalDuration()} on-demand video</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <BookOpen size={16} className="text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">{course.modules.length} modules</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Download size={16} className="text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Downloadable resources</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Globe size={16} className="text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Full lifetime access</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Shield size={16} className="text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Access on mobile and TV</span>
+                  </div>
+                  {course.certificate && (
+                    <div className="flex items-center gap-3">
+                      <Award size={16} className="text-gray-400" />
+                      <span className="text-sm text-gray-600 dark:text-gray-300">Certificate of completion</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {showEnrollmentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            {enrollmentSuccess ? (
+              <>
+                <h3 className="text-xl font-semibold mb-4 text-green-600">Enrollment Successful!</h3>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">
+                  You have successfully enrolled in <strong>{course.title}</strong>. You can now start learning!
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowEnrollmentModal(false)}
+                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                  <Link href={`/courses/${course.id}/learn`} className="flex-1">
+                    <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
+                      Continue to Course
+                    </button>
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-xl font-semibold mb-4">Confirm Enrollment</h3>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">
+                  You are about to enroll in <strong>{course.title}</strong>.
+                  {course.price > 0 && ` This will charge $${course.price} to your account.`}
+                </p>
+                {error && (
+                  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>
+                )}
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6">
+                  <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">What happens next?</h4>
+                  <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                    <li>• Immediate access to all course materials</li>
+                    <li>• Progress tracking and completion certificates</li>
+                    <li>• Lifetime access to course updates</li>
+                    <li>• 30-day money-back guarantee</li>
+                  </ul>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowEnrollmentModal(false)}
+                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleEnrollment}
+                    disabled={enrolling}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {enrolling ? 'Processing...' : 'Confirm Enrollment'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
