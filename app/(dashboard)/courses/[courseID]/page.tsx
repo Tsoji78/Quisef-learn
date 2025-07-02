@@ -9,6 +9,7 @@ import { ArrowLeft, Clock, Users, Star, CheckCircle, PlayCircle, BookOpen, Award
 import Link from 'next/link';
 import parse from 'html-react-parser';
 import { toast } from 'react-hot-toast';
+import { Timestamp } from 'firebase/firestore';
 
 interface Module {
   id: string;
@@ -58,7 +59,7 @@ interface Member {
 }
 
 interface ChatForum {
-  id: string;
+  id: number;
   title: string;
   description: string;
   memberCount: number;
@@ -88,8 +89,8 @@ export default function CourseEnrollmentPage() {
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
   const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
   const [authLoading, setAuthLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
 
   // Handle authentication state
   useEffect(() => {
@@ -203,29 +204,37 @@ export default function CourseEnrollmentPage() {
 
       if (groupsSnapshot.empty) {
         const newGroup: Omit<CourseGroup, 'id'> = {
-          name: `${course.title} Study Group`,
-          description: `Study group for ${course.title}`,
+          name: `${course.title || 'Untitled Course'} Study Group`,
+          description: `Study group for ${course.title || 'Untitled Course'}`,
           courseId: course.id,
           members: [{
             id: user.uid,
             name: user.displayName || 'Anonymous User',
             email: user.email || '',
             role: 'Student',
-            profileImage: user.photoURL || undefined,
+            profileImage: user.photoURL || '',
           }],
           chatForums: [],
           assignments: [],
           createdAt: new Date(),
         };
+        console.log('newGroup:', JSON.stringify(newGroup, null, 2));
         const newGroupRef = await addDoc(collection(db, 'groups'), newGroup);
         groupId = newGroupRef.id;
         groupRef = newGroupRef;
-        await addDoc(collection(db, 'groups', groupId, 'chatForums'), {
-          id: '1',
+        console.log('newForum:', {
+          id: 1,
           title: 'General Discussion',
           description: 'General discussion for the course',
           memberCount: 1,
-          lastMessageAt: new Date(),
+          lastMessageAt: Timestamp.fromDate(new Date()),
+        });
+        await addDoc(collection(db, 'groups', groupId, 'chatForums'), {
+          id: 1,
+          title: 'General Discussion',
+          description: 'General discussion for the course',
+          memberCount: 1,
+          lastMessageAt: Timestamp.fromDate(new Date()),
         });
       } else {
         groupId = groupsSnapshot.docs[0].id;
@@ -239,7 +248,7 @@ export default function CourseEnrollmentPage() {
               name: user.displayName || 'Anonymous User',
               email: user.email || '',
               role: 'Student',
-              profileImage: user.photoURL || undefined,
+              profileImage: user.photoURL || '',
             }),
           });
           const forumsQuery = query(collection(db, 'groups', groupId, 'chatForums'));

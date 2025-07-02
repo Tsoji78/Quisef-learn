@@ -34,7 +34,7 @@ export default function Sidebar({ isOpen, setIsOpen, darkMode }: SidebarProps) {
     { name: "Class Sessions", path: "/sessions", icon: "👥" },
     { name: "Groups", path: "/member", icon: "📊" },
     { name: "Media", path: "/media", icon: "🎬" },
-    { name: "Certificates", path: "/certificates", icon: "⚙️" },
+    { name: "Certifications", path: "/certifications", icon: "⚙️" },
   ];
 
   return (

@@ -1,72 +1,276 @@
-// app/dashboard/page.tsx
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { db } from '@/lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
+
+type Enrollment = { month: string; students: number };
+type CourseCompletion = { name: string; value: number };
+type Engagement = { course: string; engagement: number };
+type Revenue = { month: string; revenue: number };
+type Notification = { message: string; time: string; type: string };
+type Instructor = { name: string; courses: number; rating: number; students: number; completion: number };
+type Activity = { action: string; user: string; time: string; icon: string };
+type Deadline = { task: string; date: string; color: string; urgent: boolean };
 
 export default function Dashboard() {
-  // Sample data for charts
-  const enrollmentData = [
-    { month: 'Jan', students: 120 },
-    { month: 'Feb', students: 150 },
-    { month: 'Mar', students: 180 },
-    { month: 'Apr', students: 210 },
-    { month: 'May', students: 245 },
-  ];
-
-  const courseCompletionData = [
-    { name: 'Completed', value: 68 },
-    { name: 'In Progress', value: 25 },
-    { name: 'Not Started', value: 7 },
-  ];
+  const [user, setUser] = useState<User | null>(null);
+  const [enrollmentData, setEnrollmentData] = useState<Enrollment[]>([]);
+  const [courseCompletionData, setCourseCompletionData] = useState<CourseCompletion[]>([]);
+  const [engagementData, setEngagementData] = useState<Engagement[]>([]);
+  const [revenueData, setRevenueData] = useState<Revenue[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  const [recentActivity, setRecentActivity] = useState<Activity[]>([]);
+  const [deadlines, setDeadlines] = useState<Deadline[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28'];
 
-  const engagementData = [
-    { course: 'React Basics', engagement: 89 },
-    { course: 'CSS Masters', engagement: 72 },
-    { course: 'TypeScript', engagement: 95 },
-    { course: 'UI Design', engagement: 63 },
-    { course: 'JavaScript', engagement: 78 },
-    { course: 'Node.js', engagement: 81 },
-  ];
+  // Authentication check
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (currentUser) => {
+        if (!currentUser) {
+          setUser(null);
+          setLoading(false);
+          window.location.href = '/login';
+          return;
+        }
+        setUser(currentUser);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Auth state change error:', err);
+        setLoading(false);
+        window.location.href = '/login';
+      }
+    );
+    return () => unsubscribe();
+  }, []);
 
-  const revenueData = [
-    { month: 'Jan', revenue: 3200 },
-    { month: 'Feb', revenue: 4100 },
-    { month: 'Mar', revenue: 3800 },
-    { month: 'Apr', revenue: 5200 },
-    { month: 'May', revenue: 6100 },
-  ];
+  // Fetch data from Firestore
+  useEffect(() => {
+    if (!user) return;
 
-  // Mock data for notifications
-  const notifications = [
-    { message: 'New course proposal from Anna Miller', time: '10 minutes ago', type: 'info' },
-    { message: 'Server maintenance scheduled for tonight', time: '2 hours ago', type: 'warning' },
-    { message: '15 new students registered today', time: '5 hours ago', type: 'success' },
-    { message: 'Payment system outage reported', time: 'Yesterday', type: 'error' },
-  ];
+    const fetchData = async () => {
+      try {
+        setLoading(true);
 
-  // Instructor performance data
-  const instructors = [
-    { name: 'John Doe', courses: 5, rating: 4.8, students: 126, completion: 92 },
-    { name: 'Sarah Kim', courses: 3, rating: 4.9, students: 84, completion: 95 },
-    { name: 'Mark Johnson', courses: 4, rating: 4.5, students: 108, completion: 87 },
-  ];
+        // Fetch Courses
+        const coursesSnapshot = await getDocs(collection(db, 'courses'));
+        const courses = coursesSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as { id: string; title: string }[];
+
+        // Fetch Groups
+        const groupsSnapshot = await getDocs(collection(db, 'groups'));
+        const groups = groupsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as {
+          id: string;
+          name: string;
+          courseId: string;
+          members: { id: string; name: string; email: string; role: string; profileImage?: string }[];
+          assignments: { id: number; title: string; dueDate: any; status: string }[];
+          createdAt?: any;
+        }[];
+
+        // Fetch Users
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        const users = usersSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as { id: string; displayName: string; email: string }[];
+
+        // Derive Enrollment Data (based on group creation dates)
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const enrollmentByMonth = groups.reduce((acc, group) => {
+          const createdAt = group.createdAt?.toDate?.();
+          if (!createdAt) return acc;
+          const month = months[createdAt.getMonth()];
+          const year = createdAt.getFullYear();
+          const key = `${month} ${year}`;
+          acc[key] = (acc[key] || 0) + (group.members?.length || 0);
+          return acc;
+        }, {} as Record<string, number>);
+        const enrollmentData: Enrollment[] = Object.entries(enrollmentByMonth)
+          .map(([month, students]) => ({ month, students }))
+          .sort((a, b) => {
+            const [aMonth, aYear] = a.month.split(' ');
+            const [bMonth, bYear] = b.month.split(' ');
+            return new Date(`${aMonth} 1, ${aYear}`).getTime() - new Date(`${bMonth} 1, ${bYear}`).getTime();
+          })
+          .slice(-5); // Last 5 months
+        setEnrollmentData(enrollmentData);
+
+        // Derive Course Completion Data
+        const courseCompletion: CourseCompletion[] = [
+          { name: 'Completed', value: 0 },
+          { name: 'In Progress', value: 0 },
+          { name: 'Not Started', value: 0 },
+        ];
+        groups.forEach((group) => {
+          group.assignments?.forEach((assignment) => {
+            if (assignment.status === 'Completed') courseCompletion[0].value += 1;
+            else if (assignment.status === 'In Progress') courseCompletion[1].value += 1;
+            else courseCompletion[2].value += 1;
+          });
+        });
+        const totalAssignments = courseCompletion.reduce((sum, c) => sum + c.value, 0);
+        if (totalAssignments > 0) {
+          courseCompletion.forEach((c) => {
+            c.value = Math.round((c.value / totalAssignments) * 100);
+          });
+        }
+        setCourseCompletionData(courseCompletion);
+
+        // Derive Engagement Data
+        const engagement: Engagement[] = await Promise.all(
+          courses.map(async (course) => {
+            const courseGroups = groups.filter((g) => g.courseId === course.id);
+            const totalMessages = await Promise.all(
+              courseGroups.map(async (group) => {
+                const messagesSnapshot = await getDocs(
+                  collection(db, 'groups', group.id, 'chatForums', '1', 'messages')
+                );
+                return messagesSnapshot.size;
+              })
+            );
+            const engagementScore = totalMessages.reduce((sum, count) => sum + count, 0);
+            return {
+              course: course.title || 'Untitled Course',
+              engagement: engagementScore,
+            };
+          })
+        );
+        setEngagementData(engagement);
+
+        // Derive Revenue Data (Placeholder: no direct revenue data)
+        const revenueData: Revenue[] = enrollmentData.map((enrollment) => ({
+          month: enrollment.month,
+          revenue: enrollment.students * 100, // Assume $100 per student
+        }));
+        setRevenueData(revenueData);
+
+        // Derive Notifications
+        const notifications: Notification[] = groups
+          .flatMap((group) =>
+            (group.assignments || []).map((assignment) => ({
+              message: `Assignment "${assignment.title}" in group "${group.name}" is ${assignment.status.toLowerCase()}`,
+              time: assignment.dueDate?.toDate?.().toLocaleString() || new Date().toLocaleString(),
+              type: assignment.status === 'Pending' ? 'warning' : assignment.status === 'Completed' ? 'success' : 'info',
+            }))
+          )
+          .slice(0, 4); // Limit to 4 notifications
+        setNotifications(notifications);
+
+        // Derive Instructors
+        const instructors: Instructor[] = users
+          .filter((u) => groups.some((g) => g.members?.some((m) => m.id === u.id && m.role === 'Instructor')))
+          .map((user) => {
+            const instructorGroups = groups.filter((g) => g.members?.some((m) => m.id === user.id && m.role === 'Instructor'));
+            const courses = new Set(instructorGroups.map((g) => g.courseId)).size;
+            const totalStudents = instructorGroups.reduce((sum, g) => sum + (g.members?.length || 0), 0);
+            const completedAssignments = instructorGroups.reduce(
+              (sum, g) => sum + (g.assignments?.filter((a) => a.status === 'Completed').length || 0),
+              0
+            );
+            const totalAssignments = instructorGroups.reduce((sum, g) => sum + (g.assignments?.length || 0), 0);
+            const completion = totalAssignments > 0 ? Math.round((completedAssignments / totalAssignments) * 100) : 0;
+            return {
+              name: user.displayName || user.email || 'Unknown Instructor',
+              courses,
+              rating: 4.5, // Placeholder (no rating data)
+              students: totalStudents,
+              completion,
+            };
+          });
+        setInstructors(instructors);
+
+        // Derive Recent Activity
+        const recentActivity: Activity[] = await Promise.all(
+          groups.slice(0, 5).map(async (group) => {
+            const messagesSnapshot = await getDocs(
+              collection(db, 'groups', group.id, 'chatForums', '1', 'messages')
+            );
+            const latestMessage = messagesSnapshot.docs
+              .map((doc) => {
+                const data = doc.data() as { timestamp?: any; senderId?: string };
+                return { id: doc.id, ...data };
+              })
+              .sort((a, b) => (b.timestamp?.toDate?.().getTime() || 0) - (a.timestamp?.toDate?.().getTime() || 0))[0];
+            const sender = users.find((u) => u.id === latestMessage?.senderId);
+            return {
+              icon: '💬',
+              action: latestMessage ? `Sent a message in "${group.name}"` : `No recent messages in "${group.name}"`,
+              user: sender ? sender.displayName || sender.email : 'Unknown',
+              time: latestMessage?.timestamp?.toDate?.().toLocaleString() || new Date().toLocaleString(),
+            };
+          })
+        );
+        setRecentActivity(recentActivity);
+
+        // Derive Deadlines
+        const deadlines: Deadline[] = groups
+          .flatMap((group) =>
+            (group.assignments || []).map((assignment) => {
+              const dueDate = assignment.dueDate?.toDate?.() || new Date();
+              const isUrgent = dueDate < new Date(Date.now() + 24 * 60 * 60 * 1000); // Due within 24 hours
+              return {
+                task: `${assignment.title} (Group: ${group.name})`,
+                date: dueDate.toLocaleDateString(),
+                urgent: isUrgent,
+                color: isUrgent ? 'text-red-500' : 'text-amber-500',
+              };
+            })
+          )
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+          .slice(0, 3); // Limit to 3 deadlines
+        setDeadlines(deadlines);
+
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching data from Firestore:', error);
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-300">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-8">
+    <div className="p-6 space-y-8 max-w-7xl mx-auto">
       {/* Header Section with Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-blue-500">
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Total Students</h3>
-              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">245</p>
-              <p className="text-sm text-green-500 font-medium mt-2">↑ 12% from last month</p>
+              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">
+                {enrollmentData.reduce((sum, e) => sum + e.students, 0)}
+              </p>
+              <p className="text-sm text-green-500 font-medium mt-2">Calculated from groups</p>
             </div>
             <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
-              <svg className="w-6 h-6 text-blue-500 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <svg className="w-6 h-6 text-blue-500 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
               </svg>
             </div>
@@ -77,11 +281,11 @@ export default function Dashboard() {
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Active Courses</h3>
-              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">12</p>
-              <p className="text-sm text-green-500 font-medium mt-2">↑ 2 new this month</p>
+              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">{engagementData.length}</p>
+              <p className="text-sm text-green-500 font-medium mt-2">Based on courses collection</p>
             </div>
             <div className="p-3 bg-green-100 dark:bg-green-900 rounded-full">
-              <svg className="w-6 h-6 text-green-500 dark:text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <svg className="w-6 h-6 text-green-500 dark:text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
               </svg>
             </div>
@@ -92,11 +296,13 @@ export default function Dashboard() {
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Completion Rate</h3>
-              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">78%</p>
-              <p className="text-sm text-green-500 font-medium mt-2">↑ 5% from last month</p>
+              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">
+                {courseCompletionData.find((c) => c.name === 'Completed')?.value || 0}%
+              </p>
+              <p className="text-sm text-green-500 font-medium mt-2">Based on assignments</p>
             </div>
             <div className="p-3 bg-purple-100 dark:bg-purple-900 rounded-full">
-              <svg className="w-6 h-6 text-purple-500 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <svg className="w-6 h-6 text-purple-500 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
               </svg>
             </div>
@@ -107,11 +313,13 @@ export default function Dashboard() {
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Monthly Revenue</h3>
-              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">$6,100</p>
-              <p className="text-sm text-green-500 font-medium mt-2">↑ 18% from last month</p>
+              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">
+                ${revenueData.reduce((sum, r) => sum + r.revenue, 0).toLocaleString()}
+              </p>
+              <p className="text-sm text-green-500 font-medium mt-2">Estimated from enrollments</p>
             </div>
             <div className="p-3 bg-yellow-100 dark:bg-yellow-900 rounded-full">
-              <svg className="w-6 h-6 text-yellow-500 dark:text-yellow-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <svg className="w-6 h-6 text-yellow-500 dark:text-yellow-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
               </svg>
             </div>
@@ -175,7 +383,7 @@ export default function Dashboard() {
         {/* Course Engagement Bar Chart */}
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md lg:col-span-2">
           <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">
-            Course Engagement (%)
+            Course Engagement (Messages)
           </h2>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -198,12 +406,11 @@ export default function Dashboard() {
               Notifications
             </h2>
             <span className="px-2 py-1 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-xs font-medium rounded-full">
-              4 new
+              {notifications.length} new
             </span>
           </div>
           <div className="space-y-4 max-h-80 overflow-auto">
             {notifications.map((notification, index) => {
-              // Define colors based on notification type
               let colorClass = 'border-gray-200';
               if (notification.type === 'error') colorClass = 'border-red-500';
               else if (notification.type === 'warning') colorClass = 'border-yellow-500';
@@ -240,7 +447,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip formatter={(value) => [`$${value}`, 'Revenue']} />
+                <Tooltip formatter={(value: number) => [`$${value}`, 'Revenue']} />
                 <Line type="monotone" dataKey="revenue" stroke="#F59E0B" strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
@@ -293,8 +500,8 @@ export default function Dashboard() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                        <div 
-                          className="bg-green-600 dark:bg-green-500 h-2.5 rounded-full" 
+                        <div
+                          className="bg-green-600 dark:bg-green-500 h-2.5 rounded-full"
                           style={{ width: `${instructor.completion}%` }}
                         ></div>
                       </div>
@@ -316,13 +523,7 @@ export default function Dashboard() {
             Recent Activity
           </h2>
           <div className="space-y-4">
-            {[
-              { action: 'Completed Course: React Basics', user: 'Emily Johnson', time: '2 hours ago', icon: '🏆' },
-              { action: 'New Feedback: UI Design Guidelines', user: 'Michael Chen', time: 'Yesterday', icon: '💬' },
-              { action: 'Course Updated: TypeScript Advanced', user: 'Sandra Miller', time: '2 days ago', icon: '📝' },
-              { action: 'Forum Discussion: JavaScript Performance', user: 'Kevin Rodriguez', time: '3 days ago', icon: '🔄' },
-              { action: 'New Resource Uploaded: Design System Templates', user: 'Laura Wilson', time: '5 days ago', icon: '📁' },
-            ].map((activity, index) => (
+            {recentActivity.map((activity, index) => (
               <div
                 key={index}
                 className="flex items-start border-b border-gray-200 dark:border-gray-700 pb-3"
@@ -372,11 +573,7 @@ export default function Dashboard() {
               Upcoming Deadlines
             </h2>
             <ul className="space-y-3">
-              {[
-                { task: 'Final Project Reviews', date: 'Tomorrow', color: 'text-red-500', urgent: true },
-                { task: 'Quiz: JavaScript Basics', date: 'Mar 23, 2025', color: 'text-amber-500', urgent: false },
-                { task: 'Midterm Grading', date: 'Mar 25, 2025', color: 'text-green-500', urgent: false }
-              ].map((item, index) => (
+              {deadlines.map((item, index) => (
                 <li key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                   <div className="flex items-center">
                     {item.urgent && <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>}

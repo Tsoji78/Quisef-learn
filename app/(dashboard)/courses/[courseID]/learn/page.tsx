@@ -13,6 +13,7 @@ interface Module {
   id: string;
   title: string;
   content: string;
+  duration?: string;
   completed?: boolean;
 }
 
@@ -33,6 +34,8 @@ interface UserProgress {
   readModules: Record<string, boolean>;
   scrollPositions: Record<string, number>;
   lastReadDate: Date;
+  courseId: string;
+  userId: string;
 }
 
 export default function CourseDetailPage() {
@@ -48,6 +51,8 @@ export default function CourseDetailPage() {
     readModules: {},
     scrollPositions: {},
     lastReadDate: new Date(),
+    courseId: '',
+    userId: '',
   });
   const [savingProgress, setSavingProgress] = useState(false);
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -76,6 +81,8 @@ export default function CourseDetailPage() {
           readModules: data.readModules || {},
           scrollPositions: data.scrollPositions || {},
           lastReadDate: data.lastReadDate ? data.lastReadDate.toDate() : new Date(),
+          courseId: data.courseId || courseId,
+          userId: data.userId || userId,
         });
       }
     } catch (err) {
@@ -93,8 +100,8 @@ export default function CourseDetailPage() {
         readModules: updatedProgress.readModules,
         scrollPositions: updatedProgress.scrollPositions,
         lastReadDate: new Date(),
-        courseId,
-        userId: user.uid,
+        courseId: updatedProgress.courseId,
+        userId: updatedProgress.userId,
       });
 
       if (course) {
@@ -128,6 +135,8 @@ export default function CourseDetailPage() {
         [moduleId]: scrollTop,
       },
       lastReadDate: new Date(),
+      courseId,
+      userId: user?.uid || '',
     };
 
     if (scrollPercentage >= 0.9) {
@@ -168,29 +177,18 @@ export default function CourseDetailPage() {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          const courseData: Course = {
+          setCourse({
             id: docSnap.id,
             title: data.title || 'Untitled Course',
             instructor: data.instructor || 'Unknown Instructor',
             description: data.description || 'No description available.',
             level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
             duration: data.duration || 'Unknown',
-            progress: typeof data.progress === 'number' ? data.progress : 0,
+            progress: data.progress || 0,
             thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
             category: data.category || 'Uncategorized',
-            modules: Array.isArray(data.modules)
-              ? data.modules.map((m: any) => ({
-                  id: m.id || crypto.randomUUID(),
-                  title: m.title || 'Untitled Module',
-                  content: m.content || '',
-                  completed: false,
-                }))
-              : [],
-          };
-          setCourse(courseData);
-          setExpandedModules(
-            courseData.modules.reduce((acc, module) => ({ ...acc, [module.id]: true }), {})
-          );
+            modules: Array.isArray(data.modules) ? data.modules : [],
+          });
           setError(null);
         } else {
           setError('Course not found');
@@ -205,34 +203,17 @@ export default function CourseDetailPage() {
     fetchCourse();
   }, [courseId]);
 
+  // Toggle module expansion
   const toggleModule = (moduleId: string) => {
-    setExpandedModules((prev) => ({ ...prev, [moduleId]: !prev[moduleId] }));
-  };
-
-  const calculateProgress = () => {
-    if (!course) return 0;
-    const totalModules = course.modules.length;
-    if (totalModules === 0) return 0;
-    const completedModules = course.modules.filter((module) => userProgress.readModules[module.id]).length;
-    return Math.round((completedModules / totalModules) * 100);
-  };
-
-  const toggleModuleRead = (moduleId: string) => {
-    const updatedProgress = {
-      ...userProgress,
-      readModules: {
-        ...userProgress.readModules,
-        [moduleId]: !userProgress.readModules[moduleId],
-      },
-      lastReadDate: new Date(),
-    };
-    setUserProgress(updatedProgress);
-    saveUserProgress(updatedProgress);
+    setExpandedModules((prev) => ({
+      ...prev,
+      [moduleId]: !prev[moduleId],
+    }));
   };
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-screen">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
       </div>
     );
@@ -240,128 +221,84 @@ export default function CourseDetailPage() {
 
   if (error || !course) {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-          {error || 'Course not found'}
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+        <div className="container mx-auto px-4">
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error || 'Course not found'}
+          </div>
+          <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
+            <ArrowLeft size={18} className="mr-2" />
+            Back to Courses
+          </Link>
         </div>
-        <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
-          <ArrowLeft size={18} className="mr-2" />
-          Back to Courses
-        </Link>
       </div>
     );
   }
 
-  const currentProgress = calculateProgress();
-
   return (
-    <div className="container mx-auto px-4 py-8">
-      <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800 mb-6">
-        <ArrowLeft size={18} className="mr-2" />
-        Back to Courses
-      </Link>
-
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-        <div className="md:flex">
-          <img src={course.thumbnail} alt={course.title} className="w-full md:w-1/3 h-64 object-cover" />
-          <div className="p-6 flex-1">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-2">{course.title}</h1>
-            <p className="text-gray-600 dark:text-gray-300 mb-4">{course.description}</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Instructor:</span>
-                <span className="ml-2 text-gray-800 dark:text-white">{course.instructor}</span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Level:</span>
-                <span className={`ml-2 px-2 py-1 rounded-full text-xs 
-                  ${course.level === 'Beginner' ? 'bg-green-100 text-green-800' : 
-                    course.level === 'Intermediate' ? 'bg-blue-100 text-blue-800' : 
-                    'bg-purple-100 text-purple-800'}`}>
-                  {course.level}
-                </span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Duration:</span>
-                <span className="ml-2 text-gray-800 dark:text-white">{course.duration}</span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Category:</span>
-                <span className="ml-2 text-gray-800 dark:text-white">{course.category}</span>
-              </div>
-            </div>
-            {user && (
-              <div className="mt-6">
-                <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 rounded-full h-2 transition-all duration-700"
-                    style={{ width: `${currentProgress}%` }}
-                  ></div>
-                </div>
-                <div className="flex justify-between mt-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Progress</span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">{currentProgress}%</span>
-                </div>
-              </div>
-            )}
-          </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="bg-white dark:bg-gray-800 shadow-sm">
+        <div className="container mx-auto px-4 py-4">
+          <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
+            <ArrowLeft size={18} className="mr-2" />
+            Back to Courses
+          </Link>
         </div>
       </div>
 
-      <div className="mt-8">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">Modules</h2>
-        {course.modules.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400">No modules available for this course.</p>
-        ) : (
-          <div className="space-y-6">
-            {course.modules.map((module) => (
-              <div key={module.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-                <div
-                  className="px-6 py-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
-                  onClick={() => toggleModule(module.id)}
-                >
-                  <div className="flex items-center">
-                    <h3 className="text-xl font-semibold text-gray-800 dark:text-white">{module.title}</h3>
-                    {userProgress.readModules[module.id] && (
-                      <CheckCircle className="ml-2 text-green-500" size={18} />
-                    )}
-                  </div>
-                  <div className="flex items-center">
-                    <button
-                      className={`mr-4 text-sm px-3 py-1 rounded-full ${
-                        userProgress.readModules[module.id]
-                          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          : 'bg-blue-100 text-blue-600 hover:bg-blue-200'
-                      }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleModuleRead(module.id);
-                      }}
-                    >
-                      {userProgress.readModules[module.id] ? 'Mark Unread' : 'Mark Read'}
-                    </button>
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden mb-8">
+          <div className="relative">
+            <img src={course.thumbnail} alt={course.title} className="w-full h-64 object-cover" />
+          </div>
+          <div className="p-6">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-4">{course.title}</h1>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">{course.description}</p>
+            <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+              <p>Instructor: {course.instructor}</p>
+              <p>Level: {course.level}</p>
+              <p>Duration: {course.duration}</p>
+              <p>Progress: {course.progress}%</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+          <div className="p-6">
+            <h2 className="text-2xl font-semibold text-gray-800 dark:text-white mb-4">Course Content</h2>
+            <div className="space-y-4">
+              {course.modules.map((module) => (
+                <div key={module.id} className="border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <button
+                    onClick={() => toggleModule(module.id)}
+                    className="w-full flex items-center justify-between p-4 text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-gray-800 dark:text-white">{module.title}</span>
+                      {userProgress.readModules[module.id] && (
+                        <CheckCircle className="text-green-500" size={16} />
+                      )}
+                    </div>
                     {expandedModules[module.id] ? (
-                      <ChevronUp className="text-gray-500 dark:text-gray-400" size={20} />
+                      <ChevronUp className="text-gray-400" size={20} />
                     ) : (
-                      <ChevronDown className="text-gray-500 dark:text-gray-400" size={20} />
+                      <ChevronDown className="text-gray-400" size={20} />
                     )}
-                  </div>
-                </div>
-                {expandedModules[module.id] && (
-                  <div className="px-6 pb-6">
+                  </button>
+                  {expandedModules[module.id] && (
                     <div
                       ref={(el) => { contentRefs.current[module.id] = el; }}
                       onScroll={() => handleScroll(module.id)}
-                      className="prose dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 max-h-96 overflow-y-auto p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
+                      className="p-4 max-h-96 overflow-y-auto prose dark:prose-invert"
                     >
-                      {parse(module.content || '<p>No content available.</p>')}
+                      {parse(module.content)}
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
