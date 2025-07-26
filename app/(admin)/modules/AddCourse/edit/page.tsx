@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import JoditEditor from 'jodit-react';
+import { Editor } from '@tinymce/tinymce-react';
 import { Save, X, Upload, HelpCircle, Plus, Trash, Loader, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { getFirestore, collection, addDoc, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -9,7 +9,6 @@ import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { v4 as uuidv4 } from 'uuid';
-
 
 interface Module {
   id: string;
@@ -43,7 +42,8 @@ interface DeleteModalState {
 export default function CourseManagementPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const courseId = searchParams.get('id'); // Get courseId from URL query
+  const courseId = searchParams.get('id');
+  const isEditing = !!courseId;
 
   const [formData, setFormData] = useState<Course>({
     title: '',
@@ -74,48 +74,46 @@ export default function CourseManagementPage() {
         router.push('/login');
       }
     });
-
     return () => unsubscribe();
   }, [router]);
 
   // Fetch course data if editing
   useEffect(() => {
     const fetchCourse = async () => {
-      if (courseId && user) {
-        setLoading(true);
-        try {
-          const docRef = doc(db, 'courses', courseId);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const courseData = docSnap.data() as Course;
-            const modulesWithIds = courseData.modules.map((module) => ({
-              ...module,
-              id: module.id || uuidv4(), // Changed from crypto.randomUUID()
-            }));
-            setFormData({
-              ...courseData,
-              id: docSnap.id,
-              modules: modulesWithIds.length > 0 ? modulesWithIds : [{ id: uuidv4(), title: '', content: '' }], // Changed from crypto.randomUUID()
-            });
-            setErrors({});
-          } else {
-            setErrors({ general: 'Course not found' });
-          }
-        } catch (err: any) {
-          console.error('Error fetching course:', err);
-          setErrors({ general: `Failed to load course: ${err.message || 'Unknown error'}` });
-        } finally {
-          setLoading(false);
+      if (!courseId || !user) {
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const docRef = doc(db, 'courses', courseId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const courseData = docSnap.data() as Course;
+          const modulesWithIds = courseData.modules.map((module) => ({
+            ...module,
+            id: module.id || uuidv4(),
+          }));
+          setFormData({
+            ...courseData,
+            id: docSnap.id,
+            modules: modulesWithIds.length > 0 ? modulesWithIds : [{ id: uuidv4(), title: '', content: '' }],
+          });
+          setErrors({});
+        } else {
+          setModal({ isOpen: true, status: 'error', message: 'Course not found' });
         }
-      } else {
+      } catch (err: any) {
+        console.error('Error fetching course:', err);
+        setModal({ isOpen: true, status: 'error', message: `Failed to load course: ${err.message || 'Unknown error'}` });
+      } finally {
         setLoading(false);
       }
     };
-
     fetchCourse();
   }, [courseId, user]);
 
-  // Close modal and navigate on success
+  // Redirect on successful save
   useEffect(() => {
     if (modal.isOpen && modal.status === 'success') {
       const timer = setTimeout(() => {
@@ -126,63 +124,133 @@ export default function CourseManagementPage() {
     }
   }, [modal, router]);
 
+  // TinyMCE configuration
   const editorConfig = {
-    readonly: false,
     height: 400,
-    toolbarAdaptive: false,
-    buttons: [
-      'bold', 'italic', 'underline', '|',
-      'ul', 'ol', '|',
-      'font', 'fontsize', 'brush', 'paragraph', '|',
-      'image', 'video', 'table', 'link', '|',
-      'undo', 'redo',
+    menubar: 'file edit view insert format tools table',
+    plugins: [
+      'advlist autolink lists link image charmap preview anchor',
+      'searchreplace visualblocks code fullscreen',
+      'insertdatetime media table paste code help wordcount',
     ],
-    theme: 'default',
-    style: { color: '#000000' },
-    colors: {
-      greyscale: ['#000000', '#434343', '#666666', '#999999', '#B7B7B7', '#CCCCCC', '#D9D9D9', '#EFEFEF', '#F3F3F3', '#FFFFFF'],
-      palette: ['#980000', '#FF0000', '#FF9900', '#FFFF00', '#00F0F0', '#00FFFF', '#4A86E8', '#0000FF', '#9900FF', '#FF00FF'],
-      full: [
-        '#E6B8AF', '#F4CCCC', '#FCE5CD', '#FFF2CC', '#D9EAD3', '#D0E0E3', '#C9DAF8', '#CFE2F3', '#D9D2E9', '#EAD1DC',
-        '#DD7E6B', '#EA9999', '#F9CB9C', '#FFE599', '#B6D7A8', '#A2C4C9', '#A4C2F4', '#9FC5E8', '#B4A7D6', '#D5A6BD',
-        '#CC4125', '#E06666', '#F6B26B', '#FFD966', '#93C47D', '#76A5AF', '#6D9EEB', '#6FA8DC', '#8E7CC3', '#C27BA0',
-        '#A61C00', '#CC0000', '#E69138', '#F1C232', '#6AA84F', '#45818E', '#3C78D8', '#3D85C6', '#674EA7', '#A64D79',
-        '#85200C', '#990000', '#B45F06', '#BF9000', '#38761D', '#134F5C', '#1155CC', '#0B5394', '#351C75', '#741B47',
-        '#5B0F00', '#660000', '#783F04', '#7F6000', '#274E13', '#0C343D', '#1C4587', '#073763', '#20124D', '#4C1130',
-      ],
-    },
-    defaultStyle: { color: '#000000' },
-    iframe: false,
-    css: `
-      .jodit-container { color: #000000 !important; }
-      .jodit-wysiwyg { color: #000000 !important; }
-      .jodit-wysiwyg p, .jodit-wysiwyg div, .jodit-wysiwyg span, .jodit-wysiwyg a { color: #000000 !important; }
+    toolbar:
+      'undo redo | formatselect | bold italic underline | ' +
+      'forecolor backcolor | alignleft aligncenter alignright alignjustify | ' +
+      'bullist numlist outdent indent | link image media | ' +
+      'table | removeformat | code fullscreen preview',
+    content_style: `
+      body { color: #000000; background: white; }
+      p, div, span, a, h1, h2, h3, h4, h5, h6, li, td, th, pre, code { color: #000000 !important; }
+      img, video { max-width: 100%; height: auto; display: block; margin: 10px 0; cursor: pointer; }
+      .dark body { background: white; color: #000000 !important; }
     `,
+    paste_data_images: true,
+    paste_preprocess: (_: any, args: any) => {
+      args.content = args.content.replace(/style="[^"]*"/g, '');
+    },
+    images_upload_handler: async (blobInfo: any, success: (url: string) => void, failure: (err: string) => void) => {
+      try {
+        const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+        const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+        if (!cloudName || !uploadPreset) {
+          throw new Error('Cloudinary configuration is missing');
+        }
+        const formData = new FormData();
+        formData.append('file', blobInfo.blob(), blobInfo.filename());
+        formData.append('upload_preset', uploadPreset);
+        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          console.error('Image upload response:', text);
+          const errorData = JSON.parse(text);
+          throw new Error(`Image upload failed: ${errorData.error?.message || response.statusText}`);
+        }
+        const contentType = response.headers.get('content-type');
+        if (!contentType?.includes('application/json')) {
+          const text = await response.text();
+          console.error('Non-JSON image upload response:', text);
+          throw new Error('Invalid server response');
+        }
+        const data = await response.json();
+        if (!data.secure_url) throw new Error('No URL returned from upload');
+        success(data.secure_url);
+      } catch (error) {
+        console.error('Image upload error:', error);
+        setModal({ isOpen: true, status: 'error', message: 'Failed to upload image. Please try again.' });
+        failure('Image upload failed');
+      }
+    },
+    file_picker_callback: (callback: any, value: any, meta: any) => {
+      const input = document.createElement('input');
+      input.setAttribute('type', 'file');
+      input.setAttribute('accept', meta.filetype === 'image' ? 'image/jpeg,image/png,image/gif' : 'video/mp4,video/webm,video/mov');
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const maxSize = meta.filetype === 'image' ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+        if (file.size > maxSize) {
+          setModal({ isOpen: true, status: 'error', message: `File size exceeds ${meta.filetype === 'image' ? '5MB' : '10MB'} limit` });
+          return;
+        }
+        try {
+          const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+          const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+          if (!cloudName || !uploadPreset) {
+            throw new Error('Cloudinary configuration is missing');
+          }
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('upload_preset', uploadPreset);
+          const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${meta.filetype === 'image' ? 'image' : 'video'}/upload`, {
+            method: 'POST',
+            body: formData,
+          });
+          if (!response.ok) {
+            const text = await response.text();
+            console.error('File upload response:', text);
+            const errorData = JSON.parse(text);
+            throw new Error(`File upload failed: ${errorData.error?.message || response.statusText}`);
+          }
+          const contentType = response.headers.get('content-type');
+          if (!contentType?.includes('application/json')) {
+            const text = await response.text();
+            console.error('Non-JSON file upload response:', text);
+            throw new Error('Invalid server response');
+          }
+          const data = await response.json();
+          if (!data.secure_url) throw new Error('No URL returned from upload');
+          callback(data.secure_url, { alt: file.name });
+        } catch (error) {
+          console.error('File upload error:', error);
+          setModal({ isOpen: true, status: 'error', message: 'Failed to upload file. Please try again.' });
+        }
+      };
+      input.click();
+    },
+    automatic_uploads: true,
+    image_advtab: true,
+    image_caption: true,
+    file_picker_types: 'file image media',
+    images_file_types: 'jpg,jpeg,png,gif',
+    video_file_types: 'mp4,webm,mov',
   };
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value,
-    });
-
+    setFormData({ ...formData, [name]: value });
     if (errors[name]) {
       setErrors({ ...errors, [name]: '' });
     }
   };
 
-  const handleModuleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-    index: number
-  ) => {
+  const handleModuleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, index: number) => {
     const { name, value } = e.target;
     const updatedModules = [...formData.modules];
     updatedModules[index] = { ...updatedModules[index], [name]: value };
     setFormData({ ...formData, modules: updatedModules });
-
     const errorKey = `module_${index}_${name}`;
     if (errors[errorKey]) {
       setErrors({ ...errors, [errorKey]: '' });
@@ -204,29 +272,33 @@ export default function CourseManagementPage() {
   };
 
   const removeModule = (index: number) => {
-    if (formData.modules.length > 1) {
-      const updatedModules = [...formData.modules];
-      updatedModules.splice(index, 1);
-      setFormData({ ...formData, modules: updatedModules });
-      if (currentModuleIndex >= updatedModules.length) {
-        setCurrentModuleIndex(updatedModules.length - 1);
-      }
+    if (formData.modules.length <= 1) return;
+    const updatedModules = [...formData.modules];
+    updatedModules.splice(index, 1);
+    setFormData({ ...formData, modules: updatedModules });
+    if (currentModuleIndex >= updatedModules.length) {
+      setCurrentModuleIndex(updatedModules.length - 1);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      if (file.size > 10 * 1024 * 1024) {
-        alert('File size exceeds 10MB limit.');
+      const validImageTypes = ['image/jpeg', 'image/png', 'image/gif'];
+      if (!validImageTypes.includes(file.type)) {
+        setErrors({ ...errors, thumbnail: 'Only JPEG, PNG, or GIF images are allowed' });
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors({ ...errors, thumbnail: 'Thumbnail size exceeds 5MB limit' });
         return;
       }
       setThumbnailFile(file);
-
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
           setFormData({ ...formData, thumbnail: reader.result });
+          setErrors({ ...errors, thumbnail: '' });
         }
       };
       reader.readAsDataURL(file);
@@ -243,7 +315,6 @@ export default function CourseManagementPage() {
 
     const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
-
     if (!cloudName || !uploadPreset) {
       throw new Error('Cloudinary configuration is missing. Check environment variables.');
     }
@@ -257,16 +328,30 @@ export default function CourseManagementPage() {
         method: 'POST',
         body: uploadData,
       });
-
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Failed to upload image to Cloudinary: ${errorData.error?.message || 'Unknown error'}`);
+        const text = await response.text();
+        console.error('Thumbnail upload response:', text);
+        let errorMessage = response.statusText;
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.error?.message || errorMessage;
+        } catch (e) {
+          console.error('Failed to parse error response:', e);
+        }
+        throw new Error(`Failed to upload thumbnail: ${errorMessage}`);
       }
-
+      const contentType = response.headers.get('content-type');
+      if (!contentType?.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON thumbnail upload response:', text);
+        throw new Error('Invalid server response');
+      }
       const data = await response.json();
+      if (!data.secure_url) throw new Error('No URL returned from upload');
       return data.secure_url;
     } catch (error) {
-      console.error('Error uploading thumbnail:', error);
+      console.error('Thumbnail upload error:', error);
+      setModal({ isOpen: true, status: 'error', message: 'Failed to upload thumbnail. Please try again.' });
       throw error;
     }
   };
@@ -275,13 +360,11 @@ export default function CourseManagementPage() {
     const newErrors: Record<string, string> = {};
     if (!formData.title) newErrors.title = 'Course title is required';
     if (!formData.instructor) newErrors.instructor = 'Instructor name is required';
-
     formData.modules.forEach((module, index) => {
       if (!module.title) {
         newErrors[`module_${index}_title`] = `Module ${index + 1} title is required`;
       }
     });
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -291,14 +374,12 @@ export default function CourseManagementPage() {
       window.scrollTo(0, 0);
       return;
     }
-
+    setSaving(true);
     try {
-      setSaving(true);
       let thumbnailUrl = formData.thumbnail;
       if (thumbnailFile) {
         thumbnailUrl = await uploadThumbnail();
       }
-
       const courseData = {
         ...formData,
         thumbnail: thumbnailUrl,
@@ -306,28 +387,19 @@ export default function CourseManagementPage() {
         updatedAt: serverTimestamp(),
         createdAt: formData.createdAt || serverTimestamp(),
       };
-
-      if (courseId) {
-        await setDoc(doc(db, 'courses', courseId), courseData, { merge: true });
-        setModal({
-          isOpen: true,
-          status: 'success',
-          message: 'Course updated successfully!',
-        });
+      if (isEditing) {
+        await setDoc(doc(db, 'courses', courseId!), courseData, { merge: true });
+        setModal({ isOpen: true, status: 'success', message: 'Course updated successfully!' });
       } else {
         await addDoc(collection(db, 'courses'), courseData);
-        setModal({
-          isOpen: true,
-          status: 'success',
-          message: 'Course created successfully!',
-        });
+        setModal({ isOpen: true, status: 'success', message: 'Course created successfully!' });
       }
-    } catch (error) {
-      console.error('Error saving course:', error);
+    } catch (error: any) {
+      console.error('Save course error:', error);
       setModal({
         isOpen: true,
         status: 'error',
-        message: `Failed to save course: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Failed to save course: ${error.message || 'Unknown error'}`,
       });
     } finally {
       setSaving(false);
@@ -340,20 +412,15 @@ export default function CourseManagementPage() {
 
   const deleteCourse = async () => {
     if (!courseId) return;
-
     try {
       await deleteDoc(doc(db, 'courses', courseId));
-      setModal({
-        isOpen: true,
-        status: 'success',
-        message: 'Course deleted successfully!',
-      });
-    } catch (error) {
+      setModal({ isOpen: true, status: 'success', message: 'Course deleted successfully!' });
+    } catch (error: any) {
       console.error('Error deleting course:', error);
       setModal({
         isOpen: true,
         status: 'error',
-        message: `Failed to delete course: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Failed to delete course: ${error.message || 'Unknown error'}`,
       });
     } finally {
       setDeleteModal({ isOpen: false });
@@ -365,9 +432,25 @@ export default function CourseManagementPage() {
   };
 
   const goToNextStep = () => {
-    if (step === 1 && !formData.title) {
-      setErrors({ title: 'Course title is required' });
+    if (step === 1 && (!formData.title || !formData.instructor)) {
+      setErrors({
+        ...errors,
+        title: !formData.title ? 'Course title is required' : '',
+        instructor: !formData.instructor ? 'Instructor name is required' : '',
+      });
       return;
+    }
+    if (step === 2) {
+      const moduleErrors: Record<string, string> = {};
+      formData.modules.forEach((module, index) => {
+        if (!module.title) {
+          moduleErrors[`module_${index}_title`] = `Module ${index + 1} title is required`;
+        }
+      });
+      if (Object.keys(moduleErrors).length > 0) {
+        setErrors(moduleErrors);
+        return;
+      }
     }
     setStep(step + 1);
   };
@@ -380,10 +463,9 @@ export default function CourseManagementPage() {
     <div className="space-y-6">
       <div className="p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-6">
         <p className="text-sm text-blue-700 dark:text-blue-200">
-          {courseId ? 'Edit the basic course information.' : 'Start by adding the basic course information.'} Fields marked with * are required.
+          {isEditing ? 'Edit the basic course information.' : 'Start by adding the basic course information.'} Fields marked with * are required.
         </p>
       </div>
-
       <div>
         <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Course Title*
@@ -399,7 +481,6 @@ export default function CourseManagementPage() {
         />
         {errors.title && <p className="mt-1 text-sm text-red-500">{errors.title}</p>}
       </div>
-
       <div>
         <label htmlFor="instructor" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Instructor*
@@ -422,10 +503,9 @@ export default function CourseManagementPage() {
     <div className="space-y-6">
       <div className="p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-6">
         <p className="text-sm text-blue-700 dark:text-blue-200">
-          {courseId ? 'Edit or add modules to your course.' : 'Add modules to your course.'} Each module should have a title and content.
+          {isEditing ? 'Edit or add modules to your course.' : 'Add modules to your course.'} Each module should have a title and content.
         </p>
       </div>
-
       <div className="flex flex-col md:flex-row gap-4">
         <div className="md:w-1/4">
           <div className="flex justify-between items-center mb-4">
@@ -438,7 +518,6 @@ export default function CourseManagementPage() {
               <span className="text-sm">Add</span>
             </button>
           </div>
-
           <div className="space-y-2 overflow-auto max-h-96 pr-2">
             {formData.modules.map((module, index) => (
               <div
@@ -468,7 +547,6 @@ export default function CourseManagementPage() {
             ))}
           </div>
         </div>
-
         <div className="md:w-3/4">
           <div>
             <label htmlFor={`module-title-${currentModuleIndex}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -490,10 +568,9 @@ export default function CourseManagementPage() {
               <p className="mt-1 text-sm text-red-500">{errors[`module_${currentModuleIndex}_title`]}</p>
             )}
           </div>
-
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
-              <label htmlFor={`module-content-${currentModuleIndex}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Module Content
               </label>
               <button
@@ -504,37 +581,24 @@ export default function CourseManagementPage() {
                 Editor Help
               </button>
             </div>
-
             {showHelp && (
               <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-md text-sm">
-                <h4 className="font-semibold mb-2">Editor Tips:</h4>
-                <ul className="list-disc pl-5 space-y-1">
-                  <li>Use the formatting toolbar to style your content</li>
-                  <li>Add images and videos using the media buttons</li>
-                  <li>Create tables to organize information</li>
-                  <li>Use headings to structure your content</li>
+                <h4 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Editor Tips:</h4>
+                <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400">
+                  <li>Use the toolbar to format text (bold, italic, headings, etc.).</li>
+                  <li>Upload images (max 5MB) or videos (max 10MB) via the toolbar or drag-and-drop.</li>
+                  <li>Add captions to images for accessibility.</li>
+                  <li>Embed YouTube/Vimeo videos using the media button.</li>
+                  <li>Use the advanced image tab to resize or crop images.</li>
                 </ul>
               </div>
             )}
-
-            <div className="black-text-editor">
-              <JoditEditor
-                value={formData.modules[currentModuleIndex].content}
-                config={editorConfig}
-                onBlur={(content) => handleModuleContentChange(content, currentModuleIndex)}
-              />
-            </div>
-
-            <style jsx global>{`
-              .jodit-wysiwyg { color: #000000 !important; }
-              .jodit-wysiwyg p, .jodit-wysiwyg div, .jodit-wysiwyg span, .jodit-wysiwyg a,
-              .jodit-wysiwyg h1, .jodit-wysiwyg h2, .jodit-wysiwyg h3, .jodit-wysiwyg h4,
-              .jodit-wysiwyg h5, .jodit-wysiwyg h6, .jodit-wysiwyg li, .jodit-wysiwyg td,
-              .jodit-wysiwyg th, .jodit-wysiwyg pre, .jodit-wysiwyg code {
-                color: #000000 !important;
-              }
-              .dark .jodit-wysiwyg { background-color: white; color: #000000 !important; }
-            `}</style>
+            <Editor
+              apiKey="snltyidz5f1d0u369103mnu8bd2bummgggy1fib1qeoruizp"
+              value={formData.modules[currentModuleIndex].content}
+              init={editorConfig}
+              onEditorChange={(content) => handleModuleContentChange(content, currentModuleIndex)}
+            />
           </div>
         </div>
       </div>
@@ -545,10 +609,9 @@ export default function CourseManagementPage() {
     <div className="space-y-6">
       <div className="p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-6">
         <p className="text-sm text-blue-700 dark:text-blue-200">
-          {courseId ? 'Edit additional details about your course.' : 'Add additional details about your course.'}
+          {isEditing ? 'Edit additional details about your course.' : 'Add additional details about your course.'}
         </p>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label htmlFor="level" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -566,7 +629,6 @@ export default function CourseManagementPage() {
             <option value="Advanced">Advanced</option>
           </select>
         </div>
-
         <div>
           <label htmlFor="duration" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
             Duration
@@ -582,7 +644,6 @@ export default function CourseManagementPage() {
           />
         </div>
       </div>
-
       <div>
         <label htmlFor="thumbnail" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Thumbnail Image
@@ -605,6 +666,7 @@ export default function CourseManagementPage() {
             </button>
           )}
         </div>
+        {errors.thumbnail && <p className="mt-1 text-sm text-red-500">{errors.thumbnail}</p>}
         {formData.thumbnail && (
           <div className="mt-2 h-32 w-48 border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden">
             <img
@@ -620,7 +682,7 @@ export default function CourseManagementPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
+      <div className="flex justify-center items-center min-h-screen text-gray-700 dark:text-gray-300">
         <Loader className="animate-spin mr-2" />
         <span>Loading...</span>
       </div>
@@ -631,10 +693,10 @@ export default function CourseManagementPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
-          {courseId ? 'Edit Course' : 'Add New Course'}
+          {isEditing ? 'Edit Course' : 'Add New Course'}
         </h1>
         <div className="flex space-x-4">
-          {courseId && (
+          {isEditing && (
             <button
               onClick={openDeleteModal}
               className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
@@ -659,20 +721,18 @@ export default function CourseManagementPage() {
       )}
 
       <div className="flex mb-8">
-        <div className="flex-1">
-          <div className={`h-2 ${step >= 1 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'} rounded-l-full`}></div>
-          <p className={`text-center text-sm mt-2 ${step === 1 ? 'font-semibold text-blue-500' : 'text-gray-500'}`}>
-            Course Info
-          </p>
-        </div>
-        <div className="flex-1">
-          <div className={`h-2 ${step >= 2 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'}`}></div>
-          <p className={`text-center text-sm mt-2 ${step === 2 ? 'font-semibold text-blue-500' : 'text-gray-500'}`}>Modules</p>
-        </div>
-        <div className="flex-1">
-          <div className={`h-2 ${step >= 3 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'} rounded-r-full`}></div>
-          <p className={`text-center text-sm mt-2 ${step === 3 ? 'font-semibold text-blue-500' : 'text-gray-500'}`}>Details</p>
-        </div>
+        {['Course Info', 'Modules', 'Details'].map((label, index) => (
+          <div key={label} className="flex-1">
+            <div
+              className={`h-2 ${step >= index + 1 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'} ${
+                index === 0 ? 'rounded-l-full' : index === 2 ? 'rounded-r-full' : ''
+              }`}
+            ></div>
+            <p className={`text-center text-sm mt-2 ${step === index + 1 ? 'font-semibold text-blue-500' : 'text-gray-500'}`}>
+              {label}
+            </p>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
@@ -712,7 +772,6 @@ export default function CourseManagementPage() {
                 Cancel
               </button>
             </Link>
-
             {step < 3 ? (
               <button
                 onClick={goToNextStep}
@@ -735,7 +794,7 @@ export default function CourseManagementPage() {
                 ) : (
                   <>
                     <Save size={18} />
-                    <span>{courseId ? 'Update Course' : 'Save Course'}</span>
+                    <span>{isEditing ? 'Update Course' : 'Save Course'}</span>
                   </>
                 )}
               </button>
@@ -767,7 +826,7 @@ export default function CourseManagementPage() {
                   </div>
                   <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
                     <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
-                      {modal.status === 'success' ? (courseId ? 'Course Updated' : 'Course Created') : 'Operation Failed'}
+                      {modal.status === 'success' ? (isEditing ? 'Course Updated' : 'Course Created') : 'Operation Failed'}
                     </h3>
                     <div className="mt-2">
                       <p className="text-sm text-gray-500 dark:text-gray-400">{modal.message}</p>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 
@@ -28,7 +28,7 @@ export default function CoursesPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const coursesPerPage = 6;
 
-  // Authentication check
+  // Authentication check - optional for viewing courses
   useEffect(() => {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -40,28 +40,47 @@ export default function CoursesPage() {
     return () => unsubscribe();
   }, [courses]);
 
-  // Fetch courses from Firestore
+  // Fetch courses from Firestore - no authentication required
   useEffect(() => {
     const fetchCourses = async () => {
       setLoading(true);
       try {
         const coursesCollection = collection(db, 'courses');
         const coursesSnapshot = await getDocs(coursesCollection);
-        const coursesList: Course[] = coursesSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          title: doc.data().title || 'Untitled Course',
-          instructor: doc.data().instructor || 'Unknown Instructor',
-          level: ['Beginner', 'Intermediate', 'Advanced'].includes(doc.data().level)
-            ? doc.data().level
-            : 'Beginner',
-          duration: doc.data().duration || 'Unknown',
-          progress: typeof doc.data().progress === 'number' ? doc.data().progress : 0,
-          thumbnail: doc.data().thumbnail || '/api/placeholder/400/250?text=No+Image',
-          category: doc.data().category || 'Uncategorized',
-          groupId: doc.data().groupId || null,
-        }));
+        const coursesList: Course[] = await Promise.all(
+          coursesSnapshot.docs.map(async (doc) => {
+            const data = doc.data();
+            let groupId: string | undefined = undefined;
+            
+            // Check for associated study groups
+            try {
+              const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', doc.id));
+              const groupsSnapshot = await getDocs(groupsQuery);
+              if (!groupsSnapshot.empty) {
+                groupId = groupsSnapshot.docs[0].id;
+              }
+            } catch (groupError) {
+              console.warn('Error fetching group info for course:', doc.id);
+            }
+            
+            return {
+              id: doc.id,
+              title: data.title || 'Untitled Course',
+              instructor: data.instructor || 'Unknown Instructor',
+              level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level)
+                ? data.level
+                : 'Beginner',
+              duration: data.duration || 'Unknown',
+              progress: typeof data.progress === 'number' ? data.progress : 0,
+              thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
+              category: data.category || 'Uncategorized',
+              groupId,
+            };
+          })
+        );
         setCourses(coursesList);
         setError(null);
+        
         if (user) {
           checkEnrollmentStatus(user.uid, coursesList);
         }
@@ -72,10 +91,11 @@ export default function CoursesPage() {
         setLoading(false);
       }
     };
+    
     fetchCourses();
   }, [user]);
 
-  // Check enrollment status for all courses
+  // Check enrollment status for all courses - only for authenticated users
   const checkEnrollmentStatus = async (userId: string, courses: Course[]) => {
     try {
       const status: Record<string, boolean> = {};
@@ -127,7 +147,9 @@ export default function CoursesPage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">My Courses</h1>
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+          {user ? 'My Courses' : 'Available Courses'}
+        </h1>
         <div className="flex flex-wrap gap-2 justify-end">
           {categories.map((category) => (
             <button
@@ -147,9 +169,26 @@ export default function CoursesPage() {
           ))}
         </div>
       </div>
+      
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>
       )}
+      
+      {!user && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-4 py-3 rounded mb-6">
+          <p className="text-sm">
+            <Link href="/login" className="font-semibold hover:underline">
+              Sign in
+            </Link>{' '}
+            to enroll in courses and track your progress, or{' '}
+            <Link href="/register" className="font-semibold hover:underline">
+              create an account
+            </Link>{' '}
+            to get started.
+          </p>
+        </div>
+      )}
+      
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {currentCourses.map((course) => (
           <div key={course.id} className="group">
@@ -162,22 +201,26 @@ export default function CoursesPage() {
               </div>
               <div className="p-6">
                 <Link href={`/courses/${course.id}`}>
-                  <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2 hover:underline">{course.title}</h2>
+                  <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2 hover:underline">
+                    {course.title}
+                  </h2>
                 </Link>
                 <div className="flex justify-between items-center mb-4">
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.instructor}</span>
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.duration}</span>
                 </div>
+                
                 {course.groupId && (
                   <div className="mt-2">
-                    <Link href="/groups" className="text-blue-600 hover:underline text-sm">
+                    <Link href={`/groups?groupId=${course.groupId}`} className="text-blue-600 hover:underline text-sm">
                       Join Study Group
                     </Link>
                   </div>
                 )}
-                {user && (
-                  <div className="mt-4">
-                    {enrollmentStatus[course.id] ? (
+                
+                <div className="mt-4">
+                  {user ? (
+                    enrollmentStatus[course.id] ? (
                       <>
                         <Link href={`/courses/${course.id}/learn`}>
                           <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
@@ -203,19 +246,32 @@ export default function CoursesPage() {
                           Enroll Now
                         </button>
                       </Link>
-                    )}
-                  </div>
-                )}
+                    )
+                  ) : (
+                    <div className="space-y-2">
+                      <Link href={`/courses/${course.id}`}>
+                        <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                          View Course
+                        </button>
+                      </Link>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                        Sign in to enroll and track progress
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         ))}
       </div>
+      
       {!loading && currentCourses.length === 0 && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <p className="text-xl">No courses found in this category.</p>
         </div>
       )}
+      
       {filteredCourses.length > 0 && (
         <div className="flex justify-center items-center mt-8 space-x-2">
           <button

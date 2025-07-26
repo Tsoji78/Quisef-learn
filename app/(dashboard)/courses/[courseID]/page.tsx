@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, addDoc, arrayUnion, increment } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, addDoc, arrayUnion, increment, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { ArrowLeft, Clock, Users, Star, CheckCircle, PlayCircle, BookOpen, Award, Shield, Calendar, Globe, Download } from 'lucide-react';
@@ -41,6 +41,7 @@ interface Course {
   instructor_bio?: string;
   instructor_image?: string;
   preview_video?: string;
+  groupId?: string;
 }
 
 interface Enrollment {
@@ -56,25 +57,6 @@ interface Member {
   email: string;
   role: 'Student' | 'Instructor' | 'Teaching Assistant';
   profileImage?: string;
-}
-
-interface ChatForum {
-  id: number;
-  title: string;
-  description: string;
-  memberCount: number;
-  lastMessageAt: Date;
-}
-
-interface CourseGroup {
-  id: string;
-  name: string;
-  description: string;
-  courseId: string;
-  members: Member[];
-  chatForums: ChatForum[];
-  assignments: any[];
-  createdAt?: Date;
 }
 
 export default function CourseEnrollmentPage() {
@@ -113,6 +95,7 @@ export default function CourseEnrollmentPage() {
       setIsEnrolled(enrollmentSnap.exists());
     } catch (err) {
       console.error('Error checking enrollment:', err);
+      setError('Failed to check enrollment status');
     }
   };
 
@@ -153,6 +136,7 @@ export default function CourseEnrollmentPage() {
             instructor_bio: data.instructor_bio,
             instructor_image: data.instructor_image,
             preview_video: data.preview_video,
+            groupId: data.groupId,
           });
           setError(null);
         } else {
@@ -168,102 +152,118 @@ export default function CourseEnrollmentPage() {
     fetchCourse();
   }, [courseId]);
 
-  // Handle enrollment
+  // Handle enrollment with relaxed group membership logic
   const handleEnrollment = async () => {
     if (!user || !course) {
       router.push('/login');
       return;
     }
     setEnrolling(true);
+    let groupId: string | null = course.groupId || null;
+
     try {
-      const enrollmentData: Enrollment = {
-        courseId: course.id,
-        userId: user.uid,
-        enrolledAt: new Date(),
-        status: 'active',
-      };
-      const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', course.id);
-      await setDoc(enrollmentRef, enrollmentData);
+      // Check or create group outside transaction
+      if (!groupId) {
+        const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', course.id));
+        const groupsSnapshot = await getDocs(groupsQuery);
+        if (!groupsSnapshot.empty) {
+          groupId = groupsSnapshot.docs[0].id;
+        } else {
+          // Create new group
+          const groupRef = doc(collection(db, 'groups'));
+          const newGroup = {
+            name: `${course.title} Study Group`,
+            description: `Study group for ${course.title}`,
+            courseId: course.id,
+            members: [],
+            assignments: [],
+            createdAt: Timestamp.fromDate(new Date()),
+          };
+          await setDoc(groupRef, newGroup);
+          groupId = groupRef.id;
 
-      const progressRef = doc(db, 'users', user.uid, 'courseProgress', course.id);
-      await setDoc(progressRef, {
-        readModules: {},
-        scrollPositions: {},
-        lastReadDate: new Date(),
-        courseId: course.id,
-        userId: user.uid,
-      });
-
-      const courseRef = doc(db, 'courses', course.id);
-      await updateDoc(courseRef, { totalStudents: increment(1) });
-
-      const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', course.id));
-      const groupsSnapshot = await getDocs(groupsQuery);
-      let groupId: string | null = null;
-      let groupRef;
-
-      if (groupsSnapshot.empty) {
-        const newGroup: Omit<CourseGroup, 'id'> = {
-          name: `${course.title || 'Untitled Course'} Study Group`,
-          description: `Study group for ${course.title || 'Untitled Course'}`,
-          courseId: course.id,
-          members: [{
-            id: user.uid,
-            name: user.displayName || 'Anonymous User',
-            email: user.email || '',
-            role: 'Student',
-            profileImage: user.photoURL || '',
-          }],
-          chatForums: [],
-          assignments: [],
-          createdAt: new Date(),
-        };
-        console.log('newGroup:', JSON.stringify(newGroup, null, 2));
-        const newGroupRef = await addDoc(collection(db, 'groups'), newGroup);
-        groupId = newGroupRef.id;
-        groupRef = newGroupRef;
-        console.log('newForum:', {
-          id: 1,
-          title: 'General Discussion',
-          description: 'General discussion for the course',
-          memberCount: 1,
-          lastMessageAt: Timestamp.fromDate(new Date()),
-        });
-        await addDoc(collection(db, 'groups', groupId, 'chatForums'), {
-          id: 1,
-          title: 'General Discussion',
-          description: 'General discussion for the course',
-          memberCount: 1,
-          lastMessageAt: Timestamp.fromDate(new Date()),
-        });
-      } else {
-        groupId = groupsSnapshot.docs[0].id;
-        groupRef = doc(db, 'groups', groupId);
-        const groupData = groupsSnapshot.docs[0].data() as CourseGroup;
-        const userAlreadyMember = groupData.members.some((member) => member.id === user.uid);
-        if (!userAlreadyMember) {
-          await updateDoc(groupRef, {
-            members: arrayUnion({
-              id: user.uid,
-              name: user.displayName || 'Anonymous User',
-              email: user.email || '',
-              role: 'Student',
-              profileImage: user.photoURL || '',
-            }),
+          // Create default chat forum
+          await setDoc(doc(db, 'groups', groupId, 'chatForums', 'default'), {
+            id: 'default',
+            title: 'General Discussion',
+            description: 'General discussion for the course',
+            memberCount: 0,
+            lastMessageAt: Timestamp.fromDate(new Date()),
           });
-          const forumsQuery = query(collection(db, 'groups', groupId, 'chatForums'));
-          const forumsSnapshot = await getDocs(forumsQuery);
-          for (const forumDoc of forumsSnapshot.docs) {
-            const forumRef = doc(db, 'groups', groupId, 'chatForums', forumDoc.id);
-            await updateDoc(forumRef, { memberCount: increment(1) });
-          }
         }
       }
+
+      await runTransaction(db, async (transaction) => {
+        // Check if already enrolled
+        const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', course.id);
+        const enrollmentSnap = await transaction.get(enrollmentRef);
+        if (enrollmentSnap.exists()) {
+          throw new Error('You are already enrolled in this course.');
+        }
+
+        // Create enrollment
+        const enrollmentData: Enrollment = {
+          courseId: course.id,
+          userId: user.uid,
+          enrolledAt: new Date(),
+          status: 'active',
+        };
+        transaction.set(enrollmentRef, enrollmentData);
+
+        // Initialize progress
+        const progressRef = doc(db, 'users', user.uid, 'courseProgress', course.id);
+        transaction.set(progressRef, {
+          readModules: {},
+          scrollPositions: {},
+          lastReadDate: new Date(),
+          courseId: course.id,
+          userId: user.uid,
+          progress: 0,
+        });
+
+        // Update course total students and groupId
+        const courseRef = doc(db, 'courses', course.id);
+        transaction.update(courseRef, {
+          totalStudents: increment(1),
+          groupId: groupId,
+        });
+
+        // Add user to group
+        const groupRef = doc(db, 'groups', groupId!);
+        const groupSnap = await transaction.get(groupRef);
+        if (!groupSnap.exists()) {
+          throw new Error('Group not found.');
+        }
+        const groupData = groupSnap.data();
+        const newMember: Member = {
+          id: user.uid,
+          name: user.displayName || 'Anonymous User',
+          email: user.email || '',
+          role: 'Student',
+          profileImage: user.photoURL || '',
+        };
+        const isMember = groupData.members.some((m: Member) => m.id === user.uid);
+        if (!isMember) {
+          transaction.update(groupRef, {
+            members: arrayUnion(newMember),
+          });
+
+          // Add welcome message
+          const welcomeMessageRef = doc(collection(db, 'groups', groupId!, 'chatForums', 'default', 'messages'));
+          transaction.set(welcomeMessageRef, {
+            senderId: 'system',
+            senderName: 'System',
+            content: `Welcome ${user.displayName || 'new member'} to the ${course.title} study group!`,
+            timestamp: serverTimestamp(),
+          });
+        }
+      });
 
       setIsEnrolled(true);
       setEnrollmentSuccess(true);
       setError(null);
       toast.success('Enrolled successfully and added to course group!');
+      router.push(`/groups?groupId=${groupId}`);
     } catch (err: any) {
       console.error('Enrollment error:', err);
       setError(`Failed to enroll: ${err.message || 'Unknown error'}`);
@@ -550,7 +550,7 @@ export default function CourseEnrollmentPage() {
               <>
                 <h3 className="text-xl font-semibold mb-4 text-green-600">Enrollment Successful!</h3>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
-                  You have successfully enrolled in <strong>{course.title}</strong>. You can now start learning!
+                  You have successfully enrolled in <strong>{course.title}</strong>. You can now start learning and join the study group!
                 </p>
                 <div className="flex gap-3">
                   <button
@@ -581,7 +581,7 @@ export default function CourseEnrollmentPage() {
                   <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
                     <li>• Immediate access to all course materials</li>
                     <li>• Progress tracking and completion certificates</li>
-                    <li>• Lifetime access to course updates</li>
+                    <li>• Join the course study group</li>
                     <li>• 30-day money-back guarantee</li>
                   </ul>
                 </div>

@@ -1,533 +1,556 @@
-"use client"
+'use client';
 
-import type React from "react"
+import { useState, useEffect } from 'react';
+import { Editor } from '@tinymce/tinymce-react';
+import { Save, X, Upload, HelpCircle, Plus, Trash, Loader, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { getFirestore, collection, addDoc, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { db } from '@/lib/firebase';
+import { v4 as uuidv4 } from 'uuid';
 
-import { useState, useEffect } from "react"
-import { Save, X, HelpCircle, Plus, Trash, Loader, Trash2, Maximize2, Minimize2 } from "lucide-react"
-import Link from "next/link"
-import { collection, addDoc, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
-import { useRouter, useSearchParams } from "next/navigation"
-import { db } from "@/lib/firebase"
-import { v4 as uuidv4 } from "uuid"
-import { Editor, EditorState, RichUtils, AtomicBlockUtils, Modifier, convertFromHTML, ContentState } from "draft-js"
-import { stateToHTML } from "draft-js-export-html"
-
-// Type definitions
 interface Module {
-  id: string
-  title: string
-  content: string
+  id: string;
+  title: string;
+  content: string;
 }
 
 interface Course {
-  title: string
-  instructor: string
-  level: string
-  duration: string
-  thumbnail: string
-  modules: Module[]
+  id?: string;
+  title: string;
+  instructor: string;
+  level: 'Beginner' | 'Intermediate' | 'Advanced';
+  duration: string;
+  thumbnail: string;
+  modules: Module[];
+  createdBy?: string;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 interface ModalState {
-  isOpen: boolean
-  status: "success" | "error" | null
-  message: string
+  isOpen: boolean;
+  status: 'success' | 'error' | null;
+  message: string;
 }
 
 interface DeleteModalState {
-  isOpen: boolean
-}
-
-// Custom block renderer for images and videos
-const blockRendererFn = (contentBlock: import("draft-js").ContentBlock) => {
-  const type = contentBlock.getType()
-  if (type === "atomic") {
-    const entityKey = contentBlock.getEntityAt(0)
-    if (entityKey) {
-      const entity = contentBlock.getData().get("entity")
-      if (entity && entity.type === "IMAGE") {
-        return {
-          component: (props: any) => (
-            <img
-              src={props.blockProps.src || "/placeholder.svg"}
-              alt={props.blockProps.alt || ""}
-              style={{
-                width: props.blockProps.width || "auto",
-                height: props.blockProps.height || "auto",
-                display: "block",
-                margin:
-                  props.blockProps.align === "left"
-                    ? "0 auto 0 0"
-                    : props.blockProps.align === "right"
-                      ? "0 0 0 auto"
-                      : "0 auto",
-              }}
-            />
-          ),
-          editable: false,
-          props: entity.data,
-        }
-      } else if (entity && entity.type === "VIDEO") {
-        return {
-          component: (props: any) => (
-            <iframe
-              src={props.blockProps.src}
-              width={props.blockProps.width || "100%"}
-              height={props.blockProps.height || "auto"}
-              frameBorder="0"
-              allowFullScreen
-              style={{
-                display: "block",
-                margin:
-                  props.blockProps.align === "left"
-                    ? "0 auto 0 0"
-                    : props.blockProps.align === "right"
-                      ? "0 0 0 auto"
-                      : "0 auto",
-                maxWidth: "100%",
-              }}
-            />
-          ),
-          editable: false,
-          props: entity.data,
-        }
-      }
-    }
-  }
-  return null
-}
-
-// Custom Toolbar Component for Draft.js
-const Toolbar = ({
-  editorState,
-  setEditorState,
-  isFullScreen,
-  toggleFullScreen,
-}: {
-  editorState: EditorState
-  setEditorState: (state: EditorState) => void
-  isFullScreen: boolean
-  toggleFullScreen: () => void
-}) => {
-  const handleStyle = (style: string) => {
-    setEditorState(RichUtils.toggleInlineStyle(editorState, style))
-  }
-
-  const handleBlock = (blockType: string) => {
-    setEditorState(RichUtils.toggleBlockType(editorState, blockType))
-  }
-
-  const handleLink = () => {
-    const url = prompt("Enter URL")
-    if (!url) return
-    const contentState = editorState.getCurrentContent()
-    const contentStateWithEntity = contentState.createEntity("LINK", "MUTABLE", { url })
-    const entityKey = contentStateWithEntity.getLastCreatedEntityKey()
-    const selection = editorState.getSelection()
-    const newContentState = Modifier.applyEntity(contentStateWithEntity, selection, entityKey)
-    setEditorState(EditorState.push(editorState, newContentState, "apply-entity"))
-  }
-
-  const handleImage = () => {
-    const input = document.createElement("input")
-    input.type = "file"
-    input.accept = "image/*"
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0]
-      if (file) {
-        // Check file size (limit to 5MB)
-        if (file.size > 5 * 1024 * 1024) {
-          alert("Image size should be less than 5MB")
-          return
-        }
-
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          const src = event.target?.result as string
-          if (src) {
-            const width = prompt("Enter width (e.g., 300px, 50%, auto)", "auto")
-            const height = prompt("Enter height (e.g., 200px, auto)", "auto")
-            const align = prompt("Enter alignment (left, center, right)", "center")
-            const contentState = editorState.getCurrentContent()
-            const contentStateWithEntity = contentState.createEntity("IMAGE", "IMMUTABLE", {
-              src,
-              width,
-              height,
-              align,
-            })
-            const entityKey = contentStateWithEntity.getLastCreatedEntityKey()
-            const newEditorState = AtomicBlockUtils.insertAtomicBlock(editorState, entityKey, " ")
-            setEditorState(newEditorState)
-          }
-        }
-        reader.readAsDataURL(file)
-      }
-    }
-    input.click()
-  }
-
-  const handleVideo = () => {
-    const src = prompt("Enter video URL (e.g., YouTube embed URL)")
-    const width = prompt("Enter width (e.g., 560px, 100%)", "100%")
-    const height = prompt("Enter height (e.g., 315px, auto)", "auto")
-    const align = prompt("Enter alignment (left, center, right)", "center")
-    if (src) {
-      const contentState = editorState.getCurrentContent()
-      const contentStateWithEntity = contentState.createEntity("VIDEO", "IMMUTABLE", { src, width, height, align })
-      const entityKey = contentStateWithEntity.getLastCreatedEntityKey()
-      const newEditorState = AtomicBlockUtils.insertAtomicBlock(editorState, entityKey, " ")
-      setEditorState(newEditorState)
-    }
-  }
-
-  const isActiveStyle = (style: string) => editorState.getCurrentInlineStyle().has(style)
-  const isActiveBlock = (blockType: string) => RichUtils.getCurrentBlockType(editorState) === blockType
-
-  return (
-    <div className="flex flex-wrap gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-t-md border-b border-gray-300 dark:border-gray-600">
-      <button
-        onClick={() => handleStyle("BOLD")}
-        className={`p-1 rounded ${isActiveStyle("BOLD") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Bold"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.96-1.7 3.96-3.91 0-1.39-.76-2.62-1.94-3.3zM9 6h4c1.1 0 2 .9 2 2s-.9 2-2 2H9V6zm6 8H9v-4h6c1.1 0 2 .9 2 2s-.9 2-2 2z" />
-        </svg>
-      </button>
-      <button
-        onClick={() => handleStyle("ITALIC")}
-        className={`p-1 rounded ${isActiveStyle("ITALIC") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Italic"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4h-8z" />
-        </svg>
-      </button>
-      <button
-        onClick={() => handleStyle("UNDERLINE")}
-        className={`p-1 rounded ${isActiveStyle("UNDERLINE") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Underline"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z" />
-        </svg>
-      </button>
-      <button
-        onClick={() => handleBlock("header-one")}
-        className={`p-1 rounded ${isActiveBlock("header-one") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Heading 1"
-      >
-        H1
-      </button>
-      <button
-        onClick={() => handleBlock("header-two")}
-        className={`p-1 rounded ${isActiveBlock("header-two") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Heading 2"
-      >
-        H2
-      </button>
-      <button
-        onClick={() => handleBlock("unordered-list-item")}
-        className={`p-1 rounded ${isActiveBlock("unordered-list-item") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Bullet List"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z" />
-        </svg>
-      </button>
-      <button
-        onClick={() => handleBlock("ordered-list-item")}
-        className={`p-1 rounded ${isActiveBlock("ordered-list-item") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Ordered List"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z" />
-        </svg>
-      </button>
-      <button
-        onClick={() => handleBlock("code-block")}
-        className={`p-1 rounded ${isActiveBlock("code-block") ? "bg-blue-500 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"}`}
-        title="Code Block"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M8.7 15.9L4.8 12l3.9-3.9c.39-.39.39-1.01 0-1.4-.39-.39-1.01-.39-1.4 0l-4.59 4.59c-.39.39-.39 1.02 0 1.41l4.59 4.6c.39.39 1.01.39 1.4 0 .39-.39.39-1.01 0-1.4zm6.6-1.4c-.39.39-1.01.39-1.4 0-.39-.39-.39-1.01 0-1.4l3.9-3.9-3.9-3.9c-.39-.39-.39-1.01 0-1.4.39-.39 1.01-.39 1.4 0l4.59 4.59c.39.39.39 1.02 0 1.41l-4.59 4.6z" />
-        </svg>
-      </button>
-      <button
-        onClick={handleLink}
-        className={`p-1 rounded ${(() => {
-          const selection = editorState.getSelection()
-          const contentState = editorState.getCurrentContent()
-          const block = contentState.getBlockForKey(selection.getStartKey())
-          const entityKey = block.getEntityAt(selection.getStartOffset())
-          return entityKey && contentState.getEntity(entityKey).getType() === "LINK"
-            ? "bg-blue-500 text-white"
-            : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-        })()}`}
-        title="Link"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" />
-        </svg>
-      </button>
-      <button
-        onClick={handleImage}
-        className="p-1 rounded bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-        title="Insert/Adjust Image"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" />
-        </svg>
-      </button>
-      <button
-        onClick={handleVideo}
-        className="p-1 rounded bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-        title="Insert Video"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M3 5v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2zm13 10.5l-4-3v3H5v-8h7v3l4-3v7.5z" />
-        </svg>
-      </button>
-      <button
-        onClick={toggleFullScreen}
-        className="p-1 rounded bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-        title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-      >
-        {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-      </button>
-    </div>
-  )
+  isOpen: boolean;
 }
 
 export default function CourseManagementPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const courseId = searchParams.get("id")
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const courseId = searchParams.get('id');
+  const isEditing = !!courseId;
+
   const [formData, setFormData] = useState<Course>({
-    title: "",
-    instructor: "",
-    level: "Beginner",
-    duration: "",
-    thumbnail: "/api/placeholder/400/250?text=Course",
-    modules: [{ id: uuidv4(), title: "", content: "" }],
-  })
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [step, setStep] = useState(1)
-  const [showHelp, setShowHelp] = useState(false)
-  const [currentModuleIndex, setCurrentModuleIndex] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [modal, setModal] = useState<ModalState>({ isOpen: false, status: null, message: "" })
-  const [deleteModal, setDeleteModal] = useState<DeleteModalState>({ isOpen: false })
-  const [isFullScreen, setIsFullScreen] = useState(false)
-  const [editorStates, setEditorStates] = useState<EditorState[]>(formData.modules.map(() => EditorState.createEmpty()))
+    title: '',
+    instructor: '',
+    level: 'Beginner',
+    duration: '',
+    thumbnail: '/api/placeholder/400/250?text=Course',
+    modules: [{ id: uuidv4(), title: '', content: '' }],
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [step, setStep] = useState(1);
+  const [showHelp, setShowHelp] = useState(false);
+  const [currentModuleIndex, setCurrentModuleIndex] = useState(0);
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [modal, setModal] = useState<ModalState>({ isOpen: false, status: null, message: '' });
+  const [deleteModal, setDeleteModal] = useState<DeleteModalState>({ isOpen: false });
 
-  // Update editor state when module index or content changes
+  // Handle authentication state
   useEffect(() => {
-    if (courseId) {
-      const fetchCourse = async () => {
-        setLoading(true)
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        router.push('/login');
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
+  // Fetch course data if editing
+  useEffect(() => {
+    const fetchCourse = async () => {
+      if (!courseId || !user) {
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const docRef = doc(db, 'courses', courseId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const courseData = docSnap.data() as Course;
+          const modulesWithIds = courseData.modules.map((module) => ({
+            ...module,
+            id: module.id || uuidv4(),
+          }));
+          setFormData({
+            ...courseData,
+            id: docSnap.id,
+            modules: modulesWithIds.length > 0 ? modulesWithIds : [{ id: uuidv4(), title: '', content: '' }],
+          });
+          setErrors({});
+        } else {
+          setModal({ isOpen: true, status: 'error', message: 'Course not found' });
+        }
+      } catch (err: any) {
+        console.error('Error fetching course:', err);
+        setModal({ isOpen: true, status: 'error', message: `Failed to load course: ${err.message || 'Unknown error'}` });
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCourse();
+  }, [courseId, user]);
+
+  // Redirect on successful save
+  useEffect(() => {
+    if (modal.isOpen && modal.status === 'success') {
+      const timer = setTimeout(() => {
+        setModal({ isOpen: false, status: null, message: '' });
+        router.push('/modules');
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [modal, router]);
+
+  // TinyMCE configuration
+  const editorConfig = {
+    height: 400,
+    menubar: 'file edit view insert format tools table',
+    plugins: [
+      'advlist autolink lists link image charmap preview anchor',
+      'searchreplace visualblocks code fullscreen',
+      'insertdatetime media table paste code help wordcount',
+    ],
+    toolbar:
+      'undo redo | formatselect | bold italic underline | ' +
+      'forecolor backcolor | alignleft aligncenter alignright alignjustify | ' +
+      'bullist numlist outdent indent | link image media | ' +
+      'table | removeformat | code fullscreen preview',
+    content_style: `
+      body { color: #000000; background: white; }
+      p, div, span, a, h1, h2, h3, h4, h5, h6, li, td, th, pre, code { color: #000000 !important; }
+      img, video { max-width: 100%; height: auto; display: block; margin: 10px 0; cursor: pointer; }
+      .dark body { background: white; color: #000000 !important; }
+    `,
+    paste_data_images: true,
+    paste_preprocess: (_: any, args: any) => {
+      args.content = args.content.replace(/style="[^"]*"/g, '');
+    },
+    images_upload_handler: async (blobInfo: any, success: (url: string) => void, failure: (err: string) => void) => {
+      try {
+        const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+        const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+        if (!cloudName || !uploadPreset) {
+          throw new Error('Cloudinary configuration is missing');
+        }
+        const validImageTypes = ['image/jpeg', 'image/png', 'image/gif'];
+        const file = blobInfo.blob();
+        if (!validImageTypes.includes(file.type)) {
+          throw new Error('Only JPEG, PNG, or GIF images are allowed');
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          throw new Error('Image size exceeds 5MB limit');
+        }
+        const formData = new FormData();
+        formData.append('file', file, blobInfo.filename());
+        formData.append('upload_preset', uploadPreset);
+        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          console.error('Image upload response:', text);
+          let errorMessage = response.statusText;
+          try {
+            const errorData = JSON.parse(text);
+            errorMessage = errorData.error?.message || errorMessage;
+          } catch (e) {
+            console.error('Failed to parse error response:', e);
+          }
+          throw new Error(`Image upload failed: ${errorMessage}`);
+        }
+        const contentType = response.headers.get('content-type');
+        if (!contentType?.includes('application/json')) {
+          const text = await response.text();
+          console.error('Non-JSON image upload response:', text);
+          throw new Error('Invalid server response');
+        }
+        const data = await response.json();
+        if (!data.secure_url) throw new Error('No URL returned from upload');
+        success(data.secure_url);
+      } catch (error: any) {
+        console.error('Image upload error:', error);
+        setModal({ isOpen: true, status: 'error', message: `Failed to upload image: ${error.message || 'Unknown error'}` });
+        failure(error.message || 'Image upload failed');
+      }
+    },
+    file_picker_callback: (callback: any, value: any, meta: any) => {
+      const input = document.createElement('input');
+      input.setAttribute('type', 'file');
+      input.setAttribute('accept', meta.filetype === 'image' ? 'image/jpeg,image/png,image/gif' : 'video/mp4,video/webm,video/mov');
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const maxSize = meta.filetype === 'image' ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+        if (file.size > maxSize) {
+          setModal({ isOpen: true, status: 'error', message: `File size exceeds ${meta.filetype === 'image' ? '5MB' : '10MB'} limit` });
+          return;
+        }
         try {
-          const docRef = doc(db, "courses", courseId)
-          const docSnap = await getDoc(docRef)
-          if (docSnap.exists()) {
-            const data = docSnap.data() as Course
-            setFormData(data)
-            const newEditorStates = data.modules.map((module) => {
-              const blocksFromHTML = convertFromHTML(module.content || "")
-              const contentState = ContentState.createFromBlockArray(
-                blocksFromHTML.contentBlocks,
-                blocksFromHTML.entityMap,
-              )
-              return EditorState.createWithContent(contentState)
-            })
-            setEditorStates(newEditorStates)
+          const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+          const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+          if (!cloudName || !uploadPreset) {
+            throw new Error('Cloudinary configuration is missing');
           }
+          const validTypes = meta.filetype === 'image' ? ['image/jpeg', 'image/png', 'image/gif'] : ['video/mp4', 'video/webm', 'video/mov'];
+          if (!validTypes.includes(file.type)) {
+            throw new Error(`Only ${meta.filetype === 'image' ? 'JPEG, PNG, or GIF images' : 'MP4, WebM, or MOV videos'} are allowed`);
+          }
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('upload_preset', uploadPreset);
+          const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${meta.filetype === 'image' ? 'image' : 'video'}/upload`, {
+            method: 'POST',
+            body: formData,
+          });
+          if (!response.ok) {
+            const text = await response.text();
+            console.error('File upload response:', text);
+            let errorMessage = response.statusText;
+            try {
+              const errorData = JSON.parse(text);
+              errorMessage = errorData.error?.message || errorMessage;
+            } catch (e) {
+              console.error('Failed to parse error response:', e);
+            }
+            throw new Error(`File upload failed: ${errorMessage}`);
+          }
+          const contentType = response.headers.get('content-type');
+          if (!contentType?.includes('application/json')) {
+            const text = await response.text();
+            console.error('Non-JSON file upload response:', text);
+            throw new Error('Invalid server response');
+          }
+          const data = await response.json();
+          if (!data.secure_url) throw new Error('No URL returned from upload');
+          callback(data.secure_url, { alt: file.name });
         } catch (error: any) {
-          setErrors({ general: error.message || "Failed to load course." })
+          console.error('File upload error:', error);
+          setModal({ isOpen: true, status: 'error', message: `Failed to upload file: ${error.message || 'Unknown error'}` });
         }
-        setLoading(false)
-      }
-      fetchCourse()
+      };
+      input.click();
+    },
+    automatic_uploads: true,
+    image_advtab: true,
+    image_caption: true,
+    file_picker_types: 'file image media',
+    images_file_types: 'jpg,jpeg,png,gif',
+    video_file_types: 'mp4,webm,mov',
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+    if (errors[name]) {
+      setErrors({ ...errors, [name]: '' });
     }
-  }, [courseId])
+  };
 
-  // Handle editor state changes
-  const handleEditorChange = (newState: EditorState, index: number) => {
-    const newEditorStates = [...editorStates]
-    newEditorStates[index] = newState
-    setEditorStates(newEditorStates)
-    const contentState = newState.getCurrentContent()
-    const html = stateToHTML(contentState)
-    setFormData((prev) => {
-      const updatedModules = [...prev.modules]
-      updatedModules[index] = { ...updatedModules[index], content: html }
-      return { ...prev, modules: updatedModules }
-    })
-  }
-
-  // Handle paste for images and videos
-  const handlePaste = (e: React.ClipboardEvent, index: number) => {
-    const items = (e.clipboardData || (window as any).clipboardData).items
-    for (const item of items) {
-      if (item.type.indexOf("image") !== -1) {
-        const file = item.getAsFile()
-        if (file) {
-          // Check file size (limit to 5MB)
-          if (file.size > 5 * 1024 * 1024) {
-            alert("Image size should be less than 5MB")
-            return false
-          }
-
-          const reader = new FileReader()
-          reader.onload = (event) => {
-            const src = event.target?.result as string
-            if (src) {
-              const width = prompt("Enter width for pasted image (e.g., 300px, 50%, auto)", "auto")
-              const height = prompt("Enter height for pasted image (e.g., 200px, auto)", "auto")
-              const align = prompt("Enter alignment (left, center, right)", "center")
-              const contentState = editorStates[index].getCurrentContent()
-              const contentStateWithEntity = contentState.createEntity("IMAGE", "IMMUTABLE", {
-                src,
-                width,
-                height,
-                align,
-              })
-              const entityKey = contentStateWithEntity.getLastCreatedEntityKey()
-              const newEditorState = AtomicBlockUtils.insertAtomicBlock(editorStates[index], entityKey, " ")
-              handleEditorChange(newEditorState, index)
-            }
-          }
-          reader.readAsDataURL(file)
-          e.preventDefault()
-          return true
-        }
-      } else if (item.type === "text/plain") {
-        item.getAsString((text) => {
-          const videoUrlRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|vimeo\.com)\/.+$/
-          if (videoUrlRegex.test(text)) {
-            const confirmVideo = confirm("Pasted text appears to be a video URL. Insert as video?")
-            if (confirmVideo) {
-              const width = prompt("Enter width for pasted video (e.g., 560px, 100%)", "100%")
-              const height = prompt("Enter height for pasted video (e.g., 315px, auto)", "auto")
-              const align = prompt("Enter alignment for pasted video (left, center, right)", "center")
-              const contentState = editorStates[index].getCurrentContent()
-              const contentStateWithEntity = contentState.createEntity("VIDEO", "IMMUTABLE", {
-                src: text,
-                width,
-                height,
-                align,
-              })
-              const entityKey = contentStateWithEntity.getLastCreatedEntityKey()
-              const newEditorState = AtomicBlockUtils.insertAtomicBlock(editorStates[index], entityKey, " ")
-              handleEditorChange(newEditorState, index)
-              e.preventDefault()
-              return true
-            }
-          }
-        })
-      }
+  const handleModuleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, index: number) => {
+    const { name, value } = e.target;
+    const updatedModules = [...formData.modules];
+    updatedModules[index] = { ...updatedModules[index], [name]: value };
+    setFormData({ ...formData, modules: updatedModules });
+    const errorKey = `module_${index}_${name}`;
+    if (errors[errorKey]) {
+      setErrors({ ...errors, [errorKey]: '' });
     }
-    return false
-  }
+  };
 
-  // Function to open the delete modal
-  const openDeleteModal = () => setDeleteModal({ isOpen: true })
+  const handleModuleContentChange = (newContent: string, index: number) => {
+    const updatedModules = [...formData.modules];
+    updatedModules[index] = { ...updatedModules[index], content: newContent };
+    setFormData({ ...formData, modules: updatedModules });
+  };
 
-  // Function to add a new module
   const addModule = () => {
-    setFormData((prev) => ({
-      ...prev,
-      modules: [...prev.modules, { id: uuidv4(), title: "", content: "" }],
-    }))
-    setEditorStates((prev) => [...prev, EditorState.createEmpty()])
-    setCurrentModuleIndex(formData.modules.length)
-  }
+    setFormData({
+      ...formData,
+      modules: [...formData.modules, { id: uuidv4(), title: '', content: '' }],
+    });
+    setCurrentModuleIndex(formData.modules.length);
+  };
 
-  // Function to handle module title input change
-  const handleModuleInputChange = (e: React.ChangeEvent<HTMLInputElement>, index: number) => {
-    const { value } = e.target
-    setFormData((prev) => {
-      const updatedModules = [...prev.modules]
-      updatedModules[index] = { ...updatedModules[index], title: value }
-      return { ...prev, modules: updatedModules }
-    })
-  }
-
-  // Function to remove a module
   const removeModule = (index: number) => {
-    setFormData((prev) => {
-      const updatedModules = prev.modules.filter((_, i) => i !== index)
-      return { ...prev, modules: updatedModules }
-    })
-    setEditorStates((prev) => prev.filter((_, i) => i !== index))
-    setCurrentModuleIndex((prevIndex) => {
-      if (index === 0) return 0
-      if (index >= formData.modules.length - 1) return formData.modules.length - 2
-      return prevIndex > index ? prevIndex - 1 : prevIndex
-    })
-  }
+    if (formData.modules.length <= 1) return;
+    const updatedModules = [...formData.modules];
+    updatedModules.splice(index, 1);
+    setFormData({ ...formData, modules: updatedModules });
+    if (currentModuleIndex >= updatedModules.length) {
+      setCurrentModuleIndex(updatedModules.length - 1);
+    }
+  };
 
-  // Toggle full-screen mode
-  const toggleFullScreen = () => {
-    setIsFullScreen(!isFullScreen)
-  }
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const validImageTypes = ['image/jpeg', 'image/png', 'image/gif'];
+      if (!validImageTypes.includes(file.type)) {
+        setErrors({ ...errors, thumbnail: 'Only JPEG, PNG, or GIF images are allowed' });
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors({ ...errors, thumbnail: 'Thumbnail size exceeds 5MB limit' });
+        return;
+      }
+      setThumbnailFile(file);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setFormData({ ...formData, thumbnail: reader.result });
+          setErrors({ ...errors, thumbnail: '' });
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearThumbnail = () => {
+    setThumbnailFile(null);
+    setFormData({ ...formData, thumbnail: '/api/placeholder/400/250?text=Course' });
+  };
+
+  const uploadThumbnail = async (): Promise<string> => {
+    if (!thumbnailFile) return formData.thumbnail;
+
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !uploadPreset) {
+      throw new Error('Cloudinary configuration is missing. Check environment variables.');
+    }
+
+    const validImageTypes = ['image/jpeg', 'image/png', 'image/gif'];
+    if (!validImageTypes.includes(thumbnailFile.type)) {
+      throw new Error('Only JPEG, PNG, or GIF images are allowed');
+    }
+    if (thumbnailFile.size > 5 * 1024 * 1024) {
+      throw new Error('Thumbnail size exceeds 5MB limit');
+    }
+
+    const uploadData = new FormData();
+    uploadData.append('file', thumbnailFile);
+    uploadData.append('upload_preset', uploadPreset);
+
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+        method: 'POST',
+        body: uploadData,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('Thumbnail upload response:', text);
+        let errorMessage = response.statusText;
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.error?.message || errorMessage;
+        } catch (e) {
+          console.error('Failed to parse error response:', e);
+        }
+        throw new Error(`Failed to upload thumbnail: ${errorMessage}`);
+      }
+      const contentType = response.headers.get('content-type');
+      if (!contentType?.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON thumbnail upload response:', text);
+        throw new Error('Invalid server response');
+      }
+      const data = await response.json();
+      if (!data.secure_url) throw new Error('No URL returned from upload');
+      return data.secure_url;
+    } catch (error: any) {
+      console.error('Thumbnail upload error:', error);
+      setModal({ isOpen: true, status: 'error', message: `Failed to upload thumbnail: ${error.message || 'Unknown error'}` });
+      throw error;
+    }
+  };
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+    if (!formData.title) newErrors.title = 'Course title is required';
+    if (!formData.instructor) newErrors.instructor = 'Instructor name is required';
+    formData.modules.forEach((module, index) => {
+      if (!module.title) {
+        newErrors[`module_${index}_title`] = `Module ${index + 1} title is required`;
+      }
+    });
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const saveCourse = async () => {
+    if (!validateForm()) {
+      window.scrollTo(0, 0);
+      return;
+    }
+    setSaving(true);
+    try {
+      let thumbnailUrl = formData.thumbnail;
+      if (thumbnailFile) {
+        try {
+          thumbnailUrl = await uploadThumbnail();
+        } catch (error) {
+          console.warn('Thumbnail upload failed, using default thumbnail');
+          // Continue saving with default thumbnail
+        }
+      }
+      const courseData = {
+        ...formData,
+        thumbnail: thumbnailUrl,
+        createdBy: user?.uid,
+        updatedAt: serverTimestamp(),
+        createdAt: formData.createdAt || serverTimestamp(),
+      };
+      if (isEditing) {
+        await setDoc(doc(db, 'courses', courseId!), courseData, { merge: true });
+        setModal({ isOpen: true, status: 'success', message: 'Course updated successfully!' });
+      } else {
+        await addDoc(collection(db, 'courses'), courseData);
+        setModal({ isOpen: true, status: 'success', message: 'Course created successfully!' });
+      }
+    } catch (error: any) {
+      console.error('Save course error:', error);
+      setModal({
+        isOpen: true,
+        status: 'error',
+        message: `Failed to save course: ${error.message || 'Unknown error'}`,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openDeleteModal = () => {
+    setDeleteModal({ isOpen: true });
+  };
+
+  const deleteCourse = async () => {
+    if (!courseId) return;
+    try {
+      await deleteDoc(doc(db, 'courses', courseId));
+      setModal({ isOpen: true, status: 'success', message: 'Course deleted successfully!' });
+    } catch (error: any) {
+      console.error('Error deleting course:', error);
+      setModal({
+        isOpen: true,
+        status: 'error',
+        message: `Failed to delete course: ${error.message || 'Unknown error'}`,
+      });
+    } finally {
+      setDeleteModal({ isOpen: false });
+    }
+  };
+
+  const closeModal = () => {
+    setModal({ isOpen: false, status: null, message: '' });
+  };
+
+  const goToNextStep = () => {
+    if (step === 1 && (!formData.title || !formData.instructor)) {
+      setErrors({
+        ...errors,
+        title: !formData.title ? 'Course title is required' : '',
+        instructor: !formData.instructor ? 'Instructor name is required' : '',
+      });
+      return;
+    }
+    if (step === 2) {
+      const moduleErrors: Record<string, string> = {};
+      formData.modules.forEach((module, index) => {
+        if (!module.title) {
+          moduleErrors[`module_${index}_title`] = `Module ${index + 1} title is required`;
+        }
+      });
+      if (Object.keys(moduleErrors).length > 0) {
+        setErrors(moduleErrors);
+        return;
+      }
+    }
+    setStep(step + 1);
+  };
+
+  const goToPreviousStep = () => {
+    setStep(step - 1);
+  };
 
   const renderBasicInfo = () => (
     <div className="space-y-6">
+      <div className="p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-6">
+        <p className="text-sm text-blue-700 dark:text-blue-200">
+          {isEditing ? 'Edit the basic course information.' : 'Start by adding the basic course information.'} Fields marked with * are required.
+        </p>
+      </div>
       <div>
-        <label htmlFor="course-title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Course Title*
         </label>
         <input
           type="text"
-          id="course-title"
+          id="title"
           name="title"
           value={formData.title}
-          onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
+          onChange={handleInputChange}
           required
-          className={`mt-1 block w-full px-3 py-2 border ${
-            errors.title ? "border-red-500" : "border-gray-300 dark:border-gray-600"
-          } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white`}
-          placeholder="Enter course title"
+          className={`mt-1 block w-full px-3 py-2 border ${errors.title ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white`}
         />
         {errors.title && <p className="mt-1 text-sm text-red-500">{errors.title}</p>}
       </div>
       <div>
-        <label htmlFor="course-instructor" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <label htmlFor="instructor" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
           Instructor*
         </label>
         <input
           type="text"
-          id="course-instructor"
+          id="instructor"
           name="instructor"
           value={formData.instructor}
-          onChange={(e) => setFormData((prev) => ({ ...prev, instructor: e.target.value }))}
+          onChange={handleInputChange}
           required
-          className={`mt-1 block w-full px-3 py-2 border ${
-            errors.instructor ? "border-red-500" : "border-gray-300 dark:border-gray-600"
-          } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white`}
-          placeholder="Enter instructor name"
+          className={`mt-1 block w-full px-3 py-2 border ${errors.instructor ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white`}
         />
         {errors.instructor && <p className="mt-1 text-sm text-red-500">{errors.instructor}</p>}
       </div>
     </div>
-  )
+  );
 
   const renderModulesSection = () => (
     <div className="space-y-6">
       <div className="p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-6">
         <p className="text-sm text-blue-700 dark:text-blue-200">
-          {courseId ? "Edit or add modules to your course." : "Add modules to your course."} Each module should have a
-          title and content.
+          {isEditing ? 'Edit or add modules to your course.' : 'Add modules to your course.'} Each module should have a title and content.
         </p>
       </div>
-      <div className={`flex flex-col gap-4 ${isFullScreen ? "" : "lg:flex-row"}`}>
-        <div className={`${isFullScreen ? "hidden" : "lg:w-1/4 w-full"}`}>
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="md:w-1/4">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-medium text-gray-700 dark:text-gray-300">Modules</h3>
-            <button onClick={addModule} className="flex items-center text-blue-500 hover:text-blue-700">
+            <button
+              onClick={addModule}
+              className="flex items-center text-blue-500 hover:text-blue-700"
+            >
               <Plus size={16} className="mr-1" />
               <span className="text-sm">Add</span>
             </button>
@@ -536,10 +559,10 @@ export default function CourseManagementPage() {
             {formData.modules.map((module, index) => (
               <div
                 key={module.id}
-                className={`flex justify-between p-3 rounded-md cursor-pointer transition-colors ${
+                className={`flex justify-between p-3 rounded-md cursor-pointer ${
                   currentModuleIndex === index
-                    ? "bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-500"
-                    : "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
+                    ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-500'
+                    : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
                 onClick={() => setCurrentModuleIndex(index)}
               >
@@ -549,10 +572,10 @@ export default function CourseManagementPage() {
                 {formData.modules.length > 1 && (
                   <button
                     onClick={(e) => {
-                      e.stopPropagation()
-                      removeModule(index)
+                      e.stopPropagation();
+                      removeModule(index);
                     }}
-                    className="text-gray-500 hover:text-red-500 transition-colors"
+                    className="text-gray-500 hover:text-red-500"
                   >
                     <Trash size={14} />
                   </button>
@@ -561,234 +584,210 @@ export default function CourseManagementPage() {
             ))}
           </div>
         </div>
-        <div
-          className={`${isFullScreen ? "fixed inset-0 z-50 bg-white dark:bg-gray-800 p-4 overflow-auto" : "lg:w-3/4 w-full"}`}
-        >
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor={`module-title-${currentModuleIndex}`}
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-              >
-                Module Title*
+        <div className="md:w-3/4">
+          <div>
+            <label htmlFor={`module-title-${currentModuleIndex}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Module Title*
+            </label>
+            <input
+              type="text"
+              id={`module-title-${currentModuleIndex}`}
+              name="title"
+              value={formData.modules[currentModuleIndex].title}
+              onChange={(e) => handleModuleInputChange(e, currentModuleIndex)}
+              required
+              className={`mt-1 block w-full px-3 py-2 border ${
+                errors[`module_${currentModuleIndex}_title`] ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'
+              } rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white`}
+              placeholder="Enter module title"
+            />
+            {errors[`module_${currentModuleIndex}_title`] && (
+              <p className="mt-1 text-sm text-red-500">{errors[`module_${currentModuleIndex}_title`]}</p>
+            )}
+          </div>
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Module Content
               </label>
-              <input
-                type="text"
-                id={`module-title-${currentModuleIndex}`}
-                name="title"
-                value={formData.modules[currentModuleIndex].title}
-                onChange={(e) => handleModuleInputChange(e, currentModuleIndex)}
-                required
-                className={`block w-full px-3 py-2 border ${
-                  errors[`module_${currentModuleIndex}_title`]
-                    ? "border-red-500"
-                    : "border-gray-300 dark:border-gray-600"
-                } rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white transition-colors`}
-                placeholder="Enter module title"
-              />
-              {errors[`module_${currentModuleIndex}_title`] && (
-                <p className="mt-1 text-sm text-red-500">{errors[`module_${currentModuleIndex}_title`]}</p>
-              )}
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label
-                  htmlFor={`module-content-${currentModuleIndex}`}
-                  className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  Module Content
-                </label>
-                <button
-                  onClick={() => setShowHelp(!showHelp)}
-                  className="text-blue-500 hover:text-blue-700 text-sm flex items-center transition-colors"
-                >
-                  <HelpCircle size={16} className="mr-1" />
-                  Editor Help
-                </button>
-              </div>
-              {showHelp && (
-                <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-md text-sm border border-gray-200 dark:border-gray-600">
-                  <h4 className="font-semibold mb-3 text-gray-800 dark:text-gray-200">Editor Tips:</h4>
-                  <ul className="list-disc pl-5 space-y-2 text-gray-700 dark:text-gray-300">
-                    <li>Use the toolbar to format text (bold, italic, headings)</li>
-                    <li>
-                      <strong>Images:</strong> Click the image button to upload from your device, or paste images
-                      directly
-                    </li>
-                    <li>
-                      <strong>Videos:</strong> Add videos by entering a URL (e.g., YouTube embed) or pasting a video
-                      link
-                    </li>
-                    <li>Create lists for better organization</li>
-                    <li>Use code blocks for code snippets</li>
-                    <li>Add links by selecting text and entering a URL</li>
-                    <li>Click the full-screen button (⛶) to expand the editor for better focus</li>
-                    <li>
-                      <strong>File size limit:</strong> Images should be less than 5MB
-                    </li>
-                  </ul>
-                </div>
-              )}
-              <div
-                className={`border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden ${isFullScreen ? "h-[calc(100vh-200px)]" : ""}`}
+              <button
+                onClick={() => setShowHelp(!showHelp)}
+                className="text-blue-500 hover:text-blue-700 text-sm flex items-center"
               >
-                <Toolbar
-                  editorState={editorStates[currentModuleIndex]}
-                  setEditorState={(state) => handleEditorChange(state, currentModuleIndex)}
-                  isFullScreen={isFullScreen}
-                  toggleFullScreen={toggleFullScreen}
-                />
-                <div
-                  className={`p-4 bg-white dark:bg-white text-black ${isFullScreen ? "h-[calc(100vh-250px)] overflow-auto" : "min-h-[400px] max-h-[600px] overflow-auto"}`}
-                >
-                  <Editor
-                    editorState={editorStates[currentModuleIndex]}
-                    onChange={(state) => handleEditorChange(state, currentModuleIndex)}
-                    handlePastedText={(text, html, editorState) => {
-                      const result = handlePaste(
-                        {
-                          clipboardData: {
-                            items: [{ type: "text/plain", getAsString: (cb: (text: string) => void) => cb(text) }],
-                          },
-                        } as any,
-                        currentModuleIndex,
-                      )
-                      return result ? "handled" : "not-handled"
-                    }}
-                    blockRendererFn={blockRendererFn}
-                    placeholder="Start writing your module content here..."
-                  />
-                </div>
-              </div>
+                <HelpCircle size={16} className="mr-1" />
+                Editor Help
+              </button>
             </div>
+            {showHelp && (
+              <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-md text-sm">
+                <h4 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Editor Tips:</h4>
+                <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400">
+                  <li>Use the toolbar to format text (bold, italic, headings, etc.).</li>
+                  <li>Upload images (max 5MB) or videos (max 10MB) via the toolbar or drag-and-drop.</li>
+                  <li>Add captions to images for accessibility.</li>
+                  <li>Embed YouTube/Vimeo videos using the media button.</li>
+                  <li>Use the advanced image tab to resize or crop images.</li>
+                </ul>
+              </div>
+            )}
+            <Editor
+              apiKey="snltyidz5f1d0u369103mnu8bd2bummgggy1fib1qeoruizp"
+              value={formData.modules[currentModuleIndex].content}
+              init={editorConfig}
+              onEditorChange={(content) => handleModuleContentChange(content, currentModuleIndex)}
+            />
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 
-  // Step navigation handlers
-  const goToPreviousStep = () => {
-    setStep((prev) => (prev > 1 ? prev - 1 : prev))
-  }
-
-  const goToNextStep = () => {
-    setStep((prev) => (prev < 3 ? prev + 1 : prev))
-  }
-
-  // Save or update course handler
-  const saveCourse = async () => {
-    setSaving(true)
-    setErrors({})
-    try {
-      // Validate required fields
-      const newErrors: Record<string, string> = {}
-      if (!formData.title.trim()) newErrors.title = "Course title is required."
-      if (!formData.instructor.trim()) newErrors.instructor = "Instructor is required."
-      formData.modules.forEach((mod, idx) => {
-        if (!mod.title.trim()) newErrors[`module_${idx}_title`] = "Module title is required."
-      })
-      if (Object.keys(newErrors).length > 0) {
-        setErrors(newErrors)
-        setSaving(false)
-        return
-      }
-
-      if (courseId) {
-        // Update existing course
-        await setDoc(doc(db, "courses", courseId), {
-          ...formData,
-          updatedAt: serverTimestamp(),
-        })
-        setModal({ isOpen: true, status: "success", message: "Course updated successfully!" })
-      } else {
-        // Add new course
-        await addDoc(collection(db, "courses"), {
-          ...formData,
-          createdAt: serverTimestamp(),
-        })
-        setModal({ isOpen: true, status: "success", message: "Course created successfully!" })
-      }
-      setSaving(false)
-      router.push("/modules")
-    } catch (error: any) {
-      setErrors({ general: error.message || "Failed to save course." })
-      setSaving(false)
-    }
-  }
+  const renderDetailsSection = () => (
+    <div className="space-y-6">
+      <div className="p-3 bg-blue-50 dark:bg-blue-900 rounded-lg mb-6">
+        <p className="text-sm text-blue-700 dark:text-blue-200">
+          {isEditing ? 'Edit additional details about your course.' : 'Add additional details about your course.'}
+        </p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label htmlFor="level" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Level
+          </label>
+          <select
+            id="level"
+            name="level"
+            value={formData.level}
+            onChange={handleInputChange}
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+          >
+            <option value="Beginner">Beginner</option>
+            <option value="Intermediate">Intermediate</option>
+            <option value="Advanced">Advanced</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="duration" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Duration
+          </label>
+          <input
+            type="text"
+            id="duration"
+            name="duration"
+            value={formData.duration}
+            onChange={handleInputChange}
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+            placeholder="e.g., 6 weeks"
+          />
+        </div>
+      </div>
+      <div>
+        <label htmlFor="thumbnail" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          Thumbnail Image
+        </label>
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            type="file"
+            id="thumbnail"
+            accept="image/jpeg,image/png,image/gif"
+            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-gray-700 dark:file:text-gray-300 dark:hover:file:bg-gray-600"
+            onChange={handleFileChange}
+          />
+          {thumbnailFile && (
+            <button
+              onClick={clearThumbnail}
+              className="flex items-center space-x-1 text-red-500 hover:text-red-700"
+            >
+              <Trash size={16} />
+              <span>Clear</span>
+            </button>
+          )}
+        </div>
+        {errors.thumbnail && <p className="mt-1 text-sm text-red-500">{errors.thumbnail}</p>}
+        {formData.thumbnail && (
+          <div className="mt-2 h-32 w-48 border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden">
+            <img
+              src={formData.thumbnail}
+              alt="Thumbnail preview"
+              className="w-full h-full object-cover"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
+      <div className="flex justify-center items-center min-h-screen text-gray-700 dark:text-gray-300">
         <Loader className="animate-spin mr-2" />
         <span>Loading...</span>
       </div>
-    )
+    );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">
-          {courseId ? "Edit Course" : "Add New Course"}
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+          {isEditing ? 'Edit Course' : 'Add New Course'}
         </h1>
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 w-full sm:w-auto">
-          {courseId && (
+        <div className="flex space-x-4">
+          {isEditing && (
             <button
               onClick={openDeleteModal}
-              className="flex items-center justify-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+              className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
             >
               <Trash2 size={18} />
               <span>Delete Course</span>
             </button>
           )}
           <Link href="/modules">
-            <button className="flex items-center justify-center space-x-2 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors w-full sm:w-auto">
+            <button className="flex items-center space-x-2 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition-colors">
               <X size={18} />
               <span>Back to List</span>
             </button>
           </Link>
         </div>
       </div>
+
       {errors.general && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{errors.general}</div>
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {errors.general}
+        </div>
       )}
+
       <div className="flex mb-8">
-        <div className="flex-1">
-          <div className={`h-2 ${step >= 1 ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-700"} rounded-l-full`}></div>
-          <p className={`text-center text-sm mt-2 ${step === 1 ? "font-semibold text-blue-500" : "text-gray-500"}`}>
-            Course Info
-          </p>
-        </div>
-        <div className="flex-1">
-          <div className={`h-2 ${step >= 2 ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-700"}`}></div>
-          <p className={`text-center text-sm mt-2 ${step === 2 ? "font-semibold text-blue-500" : "text-gray-500"}`}>
-            Modules
-          </p>
-        </div>
-        <div className="flex-1">
-          <div className={`h-2 ${step >= 3 ? "bg-blue-500" : "bg-gray-200 dark:bg-gray-700"} rounded-r-full`}></div>
-          <p className={`text-center text-sm mt-2 ${step === 3 ? "font-semibold text-blue-500" : "text-gray-500"}`}>
-            Details
-          </p>
-        </div>
+        {['Course Info', 'Modules', 'Details'].map((label, index) => (
+          <div key={label} className="flex-1">
+            <div
+              className={`h-2 ${step >= index + 1 ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'} ${
+                index === 0 ? 'rounded-l-full' : index === 2 ? 'rounded-r-full' : ''
+              }`}
+            ></div>
+            <p className={`text-center text-sm mt-2 ${step === index + 1 ? 'font-semibold text-blue-500' : 'text-gray-500'}`}>
+              {label}
+            </p>
+          </div>
+        ))}
       </div>
+
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
         {Object.keys(errors).length > 0 && !errors.general && (
           <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md p-4 mb-6">
             <h3 className="text-red-800 dark:text-red-300 font-medium">Please fix the following errors:</h3>
             <ul className="list-disc ml-5 mt-2">
               {Object.values(errors).map((error, index) => (
-                <li key={index} className="text-red-700 dark:text-red-400 text-sm">
-                  {error}
-                </li>
+                <li key={index} className="text-red-700 dark:text-red-400 text-sm">{error}</li>
               ))}
             </ul>
           </div>
         )}
+
         {step === 1 && renderBasicInfo()}
         {step === 2 && renderModulesSection()}
-        {step === 3 && renderModulesSection()}
+        {step === 3 && renderDetailsSection()}
+
         <div className="flex justify-between pt-6 border-t mt-8">
           <div>
             {step > 1 && (
@@ -832,7 +831,7 @@ export default function CourseManagementPage() {
                 ) : (
                   <>
                     <Save size={18} />
-                    <span>{courseId ? "Update Course" : "Save Course"}</span>
+                    <span>{isEditing ? 'Update Course' : 'Save Course'}</span>
                   </>
                 )}
               </button>
@@ -840,20 +839,94 @@ export default function CourseManagementPage() {
           </div>
         </div>
       </div>
-      <style jsx global>{`
-        .align-left {
-          display: block;
-          margin: 0 auto 0 0;
-        }
-        .align-center {
-          display: block;
-          margin: 0 auto;
-        }
-        .align-right {
-          display: block;
-          margin: 0 0 0 auto;
-        }
-      `}</style>
+
+      {/* Save/Delete Status Modal */}
+      {modal.isOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" onClick={modal.status === 'error' ? closeModal : undefined}>
+              <div className="absolute inset-0 bg-gray-500 dark:bg-gray-900 opacity-75"></div>
+            </div>
+            <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <div className="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6">
+                <div className="sm:flex sm:items-start">
+                  <div className={`mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full sm:mx-0 sm:h-10 sm:w-10 ${modal.status === 'success' ? 'bg-green-100' : 'bg-red-100'}`}>
+                    {modal.status === 'success' ? (
+                      <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
+                      {modal.status === 'success' ? (isEditing ? 'Course Updated' : 'Course Created') : 'Operation Failed'}
+                    </h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{modal.message}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {modal.status === 'error' && (
+                <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    onClick={closeModal}
+                    className="w-full inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-800 text-base font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" onClick={() => setDeleteModal({ isOpen: false })}>
+              <div className="absolute inset-0 bg-gray-500 dark:bg-gray-900 opacity-75"></div>
+            </div>
+            <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <div className="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6">
+                <div className="sm:flex sm:items-start">
+                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+                    <Trash2 className="h-6 w-6 text-red-600" />
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                    <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">Delete Course</h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Are you sure you want to delete the course "{formData.title}"? This action cannot be undone.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  onClick={deleteCourse}
+                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setDeleteModal({ isOpen: false })}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-800 text-base font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  )
+  );
 }
