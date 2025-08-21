@@ -53,6 +53,28 @@ const HIGHLIGHT_COLORS = [
 
 const TEXT_ALIGN_OPTIONS = ['left', 'center', 'right', 'justify'] as const;
 
+// Font families from FontStylePicker
+const FONT_FAMILIES = [
+  { name: 'Default', value: '', preview: 'Default font' },
+  { name: 'Arial', value: 'Arial, sans-serif', preview: 'Clean and modern' },
+  { name: 'Helvetica', value: 'Helvetica, Arial, sans-serif', preview: 'Professional look' },
+  { name: 'Georgia', value: 'Georgia, serif', preview: 'Elegant serif' },
+  { name: 'Times New Roman', value: 'Times New Roman, serif', preview: 'Classic serif' },
+  { name: 'Courier New', value: 'Courier New, monospace', preview: 'Monospace font' },
+  { name: 'Verdana', value: 'Verdana, sans-serif', preview: 'High readability' },
+  { name: 'Trebuchet MS', value: 'Trebuchet MS, sans-serif', preview: 'Friendly appearance' },
+  { name: 'Impact', value: 'Impact, sans-serif', preview: 'Bold and strong' },
+  { name: 'Comic Sans MS', value: 'Comic Sans MS, cursive', preview: 'Casual and fun' },
+  { name: 'Palatino', value: 'Palatino, serif', preview: 'Refined elegance' },
+  { name: 'Garamond', value: 'Garamond, serif', preview: 'Literary classic' },
+  { name: 'Roboto', value: 'Roboto, sans-serif', preview: 'Modern Google font' },
+  { name: 'Open Sans', value: 'Open Sans, sans-serif', preview: 'Friendly humanist' },
+  { name: 'Lato', value: 'Lato, sans-serif', preview: 'Semi-rounded details' },
+  { name: 'Montserrat', value: 'Montserrat, sans-serif', preview: 'Urban inspired' },
+  { name: 'Playfair Display', value: 'Playfair Display, serif', preview: 'High contrast serif' },
+  { name: 'Source Sans Pro', value: 'Source Sans Pro, sans-serif', preview: 'Adobe creation' },
+];
+
 interface EditorStatesState {
   states: Map<number, EditorState>;
   uploading: Map<number, boolean>;
@@ -117,8 +139,18 @@ HIGHLIGHT_COLORS.forEach((color) => {
   };
 });
 
+// Add font family styles
+const fontStyleMap: Record<string, React.CSSProperties> = {};
+FONT_FAMILIES.forEach((font) => {
+  if (font.value) {
+    const fontKey = font.name.replace(/\s+/g, '_').toUpperCase();
+    fontStyleMap[`FONT_FAMILY_${fontKey}`] = { fontFamily: font.value };
+  }
+});
+
 const styleMap = {
   ...colorStyleMap,
+  ...fontStyleMap,
   BOLD: { fontWeight: 'bold' },
   ITALIC: { fontStyle: 'italic' },
   UNDERLINE: { textDecoration: 'underline' },
@@ -547,6 +579,62 @@ export const useDraftEditor = (
     [getEditorState, handleEditorStateChange, setModal]
   );
 
+  const handleFontFamily = useCallback(
+    (moduleIndex: number, fontFamily: string) => {
+      const currentState = getEditorState(moduleIndex);
+      const selection = currentState.getSelection();
+      if (selection.isCollapsed()) {
+        setModal({
+          isOpen: true,
+          status: 'error',
+          message: 'Please select text to apply font family',
+        });
+        return;
+      }
+
+      let newState = currentState;
+      const currentInlineStyle = currentState.getCurrentInlineStyle();
+      
+      // Remove existing font family styles
+      currentInlineStyle.forEach((style) => {
+        if (style && style.startsWith('FONT_FAMILY_')) {
+          newState = RichUtils.toggleInlineStyle(newState, style);
+        }
+      });
+
+      // Apply new font family if provided
+      if (fontFamily) {
+        const font = FONT_FAMILIES.find(f => f.value === fontFamily);
+        if (font && font.value) {
+          const fontKey = font.name.replace(/\s+/g, '_').toUpperCase();
+          newState = RichUtils.toggleInlineStyle(newState, `FONT_FAMILY_${fontKey}`);
+        }
+      }
+
+      handleEditorStateChange(moduleIndex, newState);
+    },
+    [getEditorState, handleEditorStateChange, setModal]
+  );
+
+  const getCurrentFontFamily = useCallback(
+    (moduleIndex: number): string | null => {
+      const editorState = getEditorState(moduleIndex);
+      const currentStyle = editorState.getCurrentInlineStyle();
+      const styleArray = currentStyle.toArray();
+      for (const style of styleArray) {
+        if (style && style.startsWith('FONT_FAMILY_')) {
+          const fontKey = style.replace('FONT_FAMILY_', '');
+          const font = FONT_FAMILIES.find(f => 
+            f.name.replace(/\s+/g, '_').toUpperCase() === fontKey
+          );
+          return font ? font.value : null;
+        }
+      }
+      return null;
+    },
+    [getEditorState]
+  );
+
   const handleImageUpload = useMemo(() => createMediaUploadHandler('image'), [createMediaUploadHandler]);
   const handleVideoUpload = useMemo(() => createMediaUploadHandler('video'), [createMediaUploadHandler]);
   const handleGifUpload = useMemo(() => createMediaUploadHandler('gif'), [createMediaUploadHandler]);
@@ -873,6 +961,7 @@ export const useDraftEditor = (
       textColors: TEXT_COLORS,
       highlightColors: HIGHLIGHT_COLORS,
       textAlignOptions: TEXT_ALIGN_OPTIONS,
+      fontFamilies: FONT_FAMILIES,
       handleEditorStateChange,
       handleKeyCommand,
       getEditorState,
@@ -885,6 +974,7 @@ export const useDraftEditor = (
       clearFormatting,
       handleTextColor,
       handleTextHighlight,
+      handleFontFamily,
       handleTextAlignment,
       handleColorPicker,
       handleImageUpload,
@@ -903,6 +993,7 @@ export const useDraftEditor = (
       getCurrentTextAlignment,
       getCurrentTextColor,
       getCurrentHighlightColor,
+      getCurrentFontFamily,
       isUploading: (moduleIndex: number) => isUploading.get(moduleIndex) || false,
       saveToFirebase,
     }),
@@ -918,6 +1009,7 @@ export const useDraftEditor = (
       clearFormatting,
       handleTextColor,
       handleTextHighlight,
+      handleFontFamily,
       handleTextAlignment,
       handleColorPicker,
       handleImageUpload,
@@ -936,6 +1028,7 @@ export const useDraftEditor = (
       getCurrentTextAlignment,
       getCurrentTextColor,
       getCurrentHighlightColor,
+      getCurrentFontFamily,
       isUploading,
       saveToFirebase,
     ]

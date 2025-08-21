@@ -6,6 +6,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { Course, ModalState } from '../types';
 import { uploadToCloudinary } from '@/utils/cloudinary';
 import { validateForm } from '@/utils/validation';
+import { createUserDocument } from '@/utils/userUtils';
+
 
 export const useCourse = (user: any, courseId: string | null) => {
   const router = useRouter();

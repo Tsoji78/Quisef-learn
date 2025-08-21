@@ -30,6 +30,7 @@ interface DraftEditorState {
   textColors: string[];
   highlightColors: string[];
   textAlignOptions: readonly string[];
+  fontFamilies: Array<{ name: string; value: string; preview: string }>;
 }
 
 interface DraftEditorActions {
@@ -46,6 +47,7 @@ interface DraftEditorActions {
   handleLinkToggle: (moduleIndex: number) => void;
   handleTextColor: (moduleIndex: number, color: string) => void;
   handleTextHighlight: (moduleIndex: number, color: string) => void;
+  handleFontFamily: (moduleIndex: number, fontFamily: string) => void;
   handleTextAlignment: (moduleIndex: number, alignment: string) => void;
   handleColorPicker: (moduleIndex: number, type: 'text' | 'highlight') => void;
   formatText: (moduleIndex: number, format: string) => void;
@@ -59,6 +61,7 @@ interface DraftEditorActions {
   getCurrentTextAlignment: (moduleIndex: number) => string;
   getCurrentTextColor: (moduleIndex: number) => string | null;
   getCurrentHighlightColor: (moduleIndex: number) => string | null;
+  getCurrentFontFamily: (moduleIndex: number) => string | null;
   setEditorRef: (moduleIndex: number, ref: Editor | null) => void;
   isUploading: (moduleIndex: number) => boolean;
   saveToFirebase: (courseId: string) => Promise<void>;
@@ -130,6 +133,7 @@ export default function CourseManagementPage() {
     textColors: editorHook.textColors,
     highlightColors: editorHook.highlightColors,
     textAlignOptions: editorHook.textAlignOptions,
+    fontFamilies: editorHook.fontFamilies,
   }), [
     editorHook.editorStates,
     editorHook.editorRefs,
@@ -139,6 +143,7 @@ export default function CourseManagementPage() {
     editorHook.textColors,
     editorHook.highlightColors,
     editorHook.textAlignOptions,
+    editorHook.fontFamilies,
   ]);
 
   const draftEditorActions: DraftEditorActions = useMemo(() => ({
@@ -155,6 +160,7 @@ export default function CourseManagementPage() {
     handleLinkToggle: editorHook.handleLinkToggle,
     handleTextColor: editorHook.handleTextColor,
     handleTextHighlight: editorHook.handleTextHighlight,
+    handleFontFamily: editorHook.handleFontFamily,
     handleTextAlignment: editorHook.handleTextAlignment,
     handleColorPicker: editorHook.handleColorPicker,
     formatText: editorHook.formatText,
@@ -168,6 +174,7 @@ export default function CourseManagementPage() {
     getCurrentTextAlignment: editorHook.getCurrentTextAlignment,
     getCurrentTextColor: editorHook.getCurrentTextColor,
     getCurrentHighlightColor: editorHook.getCurrentHighlightColor,
+    getCurrentFontFamily: editorHook.getCurrentFontFamily,
     setEditorRef: editorHook.setEditorRef,
     isUploading: editorHook.isUploading,
     saveToFirebase: editorHook.saveToFirebase,

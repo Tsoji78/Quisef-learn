@@ -28,6 +28,7 @@ interface DraftEditorActions {
   handleLinkToggle: (moduleIndex: number) => void;
   handleTextColor: (moduleIndex: number, color: string) => void;
   handleTextHighlight: (moduleIndex: number, color: string) => void;
+  handleFontFamily: (moduleIndex: number, fontFamily: string) => void;
   handleTextAlignment: (moduleIndex: number, alignment: string) => void;
   handleColorPicker: (moduleIndex: number, type: 'text' | 'highlight') => void;
   formatText: (moduleIndex: number, format: string) => void;
@@ -41,6 +42,7 @@ interface DraftEditorActions {
   getCurrentTextAlignment: (moduleIndex: number) => string;
   getCurrentTextColor: (moduleIndex: number) => string | null;
   getCurrentHighlightColor: (moduleIndex: number) => string | null;
+  getCurrentFontFamily: (moduleIndex: number) => string | null;
   setEditorRef: (moduleIndex: number, ref: Editor | null) => void;
   isUploading: (moduleIndex: number) => boolean;
   getEditorState: (moduleIndex: number) => EditorState;
@@ -55,6 +57,7 @@ interface DraftEditorState {
   textColors: string[];
   highlightColors: string[];
   textAlignOptions: readonly string[];
+  fontFamilies: Array<{ name: string; value: string; preview: string }>;
 }
 
 interface CourseActions {
@@ -227,6 +230,7 @@ const ModuleEditor = React.memo(({
               textColors: draftEditorState.textColors,
               highlightColors: draftEditorState.highlightColors,
               textAlignOptions: draftEditorState.textAlignOptions,
+              fontFamilies: draftEditorState.fontFamilies,
               handleEditorStateChange: draftEditorActions.handleEditorStateChange,
               getEditorState: draftEditorActions.getEditorState,
               setEditorRef: draftEditorActions.setEditorRef,
@@ -239,6 +243,7 @@ const ModuleEditor = React.memo(({
               handleLinkToggle: draftEditorActions.handleLinkToggle,
               handleTextColor: draftEditorActions.handleTextColor,
               handleTextHighlight: draftEditorActions.handleTextHighlight,
+              handleFontFamily: draftEditorActions.handleFontFamily,
               handleTextAlignment: draftEditorActions.handleTextAlignment,
               handleColorPicker: draftEditorActions.handleColorPicker,
               formatText: draftEditorActions.formatText,
@@ -249,6 +254,7 @@ const ModuleEditor = React.memo(({
               getCurrentTextAlignment: draftEditorActions.getCurrentTextAlignment,
               getCurrentTextColor: draftEditorActions.getCurrentTextColor,
               getCurrentHighlightColor: draftEditorActions.getCurrentHighlightColor,
+              getCurrentFontFamily: draftEditorActions.getCurrentFontFamily,
               isUploading: draftEditorActions.isUploading,
             }}
             formData={formData}
@@ -616,17 +622,6 @@ export default function CourseForm({
       <ProgressBar step={step} />
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-        {hasErrors && !errors.general && (
-          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-md p-4 mb-6" role="alert">
-            <h3 className="text-red-800 dark:text-red-300 font-medium">Please fix the following errors:</h3>
-            <ul className="list-disc ml-5 mt-2">
-              {errorMessages.map((error, index) => (
-                <li key={index} className="text-red-700 dark:text-red-400 text-sm">{error}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         {step === 1 && (
           <BasicInfoSection
             formData={formData}

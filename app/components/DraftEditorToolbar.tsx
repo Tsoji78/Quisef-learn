@@ -3,6 +3,7 @@ import { EditorState, ContentBlock, RawDraftContentState } from 'draft-js';
 import { ModalState } from '@/types';
 import { ColorPicker } from './ColorPicker';
 import { EmojiPicker } from './EmojiPicker';
+import { FontStylePicker } from './FontStylePicker';
 
 interface DraftEditorToolbarProps {
   moduleIndex: number;
@@ -14,6 +15,7 @@ interface DraftEditorToolbarProps {
     textColors: string[];
     highlightColors: string[];
     textAlignOptions: readonly string[];
+    fontFamilies: Array<{ name: string; value: string; preview: string }>;
     handleEditorStateChange: (moduleIndex: number, newEditorState: EditorState) => void;
     handleInlineStyleChange: (moduleIndex: number, inlineStyle: string) => void;
     handleBlockTypeChange: (moduleIndex: number, blockType: string) => void;
@@ -27,6 +29,7 @@ interface DraftEditorToolbarProps {
     handleLinkToggle: (moduleIndex: number) => void;
     handleTextColor: (moduleIndex: number, color: string) => void;
     handleTextHighlight: (moduleIndex: number, color: string) => void;
+    handleFontFamily: (moduleIndex: number, fontFamily: string) => void;
     handleTextAlignment: (moduleIndex: number, alignment: string) => void;
     handleColorPicker: (moduleIndex: number, type: 'text' | 'highlight') => void;
     formatText: (moduleIndex: number, format: string) => void;
@@ -40,6 +43,7 @@ interface DraftEditorToolbarProps {
     getCurrentTextAlignment: (moduleIndex: number) => string;
     getCurrentTextColor: (moduleIndex: number) => string | null;
     getCurrentHighlightColor: (moduleIndex: number) => string | null;
+    getCurrentFontFamily: (moduleIndex: number) => string | null;
     setEditorRef: (moduleIndex: number, ref: any) => void;
     isUploading: (moduleIndex: number) => boolean;
   };
@@ -63,6 +67,7 @@ export const DraftEditorToolbar: React.FC<DraftEditorToolbarProps> = ({
     handleLinkToggle,
     handleTextColor,
     handleTextHighlight,
+    handleFontFamily,
     handleTextAlignment,
     handleColorPicker,
     formatText,
@@ -70,11 +75,13 @@ export const DraftEditorToolbar: React.FC<DraftEditorToolbarProps> = ({
     textColors,
     highlightColors,
     textAlignOptions,
+    fontFamilies,
     hasInlineStyle,
     getCurrentBlockType,
     getCurrentTextAlignment,
     getCurrentTextColor,
     getCurrentHighlightColor,
+    getCurrentFontFamily,
   } = editorHook;
 
   // Enhanced video embed handler
@@ -100,6 +107,23 @@ export const DraftEditorToolbar: React.FC<DraftEditorToolbarProps> = ({
         message: 'Please enter a valid URL (including http:// or https://)',
       });
     }
+  };
+
+  // Enhanced font family handler with validation
+  const handleEnhancedFontFamily = (fontFamily: string) => {
+    const currentState = editorHook.editorStates[moduleIndex];
+    if (!currentState) return;
+    
+    const selection = currentState.getSelection();
+    if (selection.isCollapsed()) {
+      setModal({
+        isOpen: true,
+        status: 'error',
+        message: 'Please select text to apply font family',
+      });
+      return;
+    }
+    handleFontFamily(moduleIndex, fontFamily);
   };
 
   return (
@@ -184,6 +208,15 @@ export const DraftEditorToolbar: React.FC<DraftEditorToolbarProps> = ({
             • List
           </button>
         </div>
+
+        <div className="w-px h-6 bg-gray-300" />
+
+        {/* Font Family Picker */}
+        <FontStylePicker
+          currentFont={getCurrentFontFamily(moduleIndex)}
+          onFontSelect={handleEnhancedFontFamily}
+          disabled={isUploading}
+        />
 
         <div className="w-px h-6 bg-gray-300" />
 

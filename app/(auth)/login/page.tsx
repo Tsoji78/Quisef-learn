@@ -5,8 +5,9 @@ import Head from 'next/head';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { auth, googleProvider } from '@/lib/firebase';
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { auth, googleProvider, db } from '@/lib/firebase';
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
+import { createUserDocument } from '@/utils/userUtils';
 
 interface CarouselImage {
   src: string;
@@ -41,6 +42,8 @@ const LoginPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [carouselImages.length]);
 
+  // This function is now imported from utils/userUtils
+
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -53,10 +56,25 @@ const LoginPage: React.FC = () => {
         await auth.signOut();
         return;
       }
+      
+      // Create user document in Firestore
+      await createUserDocument(userCredential.user);
+      
       console.log('Successfully logged in with email');
-      router.push("/dashboard"); // Redirect to dashboard instead of home
+      router.push("/dashboard");
     } catch (error: any) {
-      setError(error.message);
+      console.error('Email login error:', error);
+      if (error.code === 'auth/user-not-found') {
+        setError('No account found with this email address');
+      } else if (error.code === 'auth/wrong-password') {
+        setError('Incorrect password');
+      } else if (error.code === 'auth/invalid-email') {
+        setError('Invalid email address');
+      } else if (error.code === 'auth/too-many-requests') {
+        setError('Too many failed attempts. Please try again later');
+      } else {
+        setError(error.message || 'An error occurred during login');
+      }
     } finally {
       setLoading(false);
     }
@@ -83,16 +101,24 @@ const LoginPage: React.FC = () => {
       // Get the profile info from Google Sign In
       const user = result.user;
       
+      // Create user document in Firestore
+      await createUserDocument(user);
+      
       console.log('Successfully logged in with Google');
       console.log('Profile image URL:', user.photoURL);
       
-      // Redirect to home
-      router.push("/home");
+      // Redirect to dashboard
+      router.push("/dashboard");
     } catch (error: any) {
+      console.error('Google login error:', error);
       if (error.code === 'auth/popup-closed-by-user') {
         setError("Sign-in canceled. Please try again.");
+      } else if (error.code === 'auth/popup-blocked') {
+        setError("Popup blocked. Please allow popups and try again.");
+      } else if (error.code === 'auth/network-request-failed') {
+        setError("Network error. Please check your connection and try again.");
       } else {
-        setError(error.message);
+        setError(error.message || 'An error occurred during Google sign-in');
       }
     } finally {
       setLoading(false);
@@ -177,7 +203,11 @@ const LoginPage: React.FC = () => {
               <p className="text-gray-600">Please sign in to your account</p>
             </div>
 
-            {error && <p className="text-red-500 text-center mb-4">{error}</p>}
+            {error && (
+              <div className="mb-4 p-3 text-red-500 bg-red-50 border border-red-200 rounded-md text-center">
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleEmailLogin} className="space-y-6">
               <div>
@@ -197,58 +227,59 @@ const LoginPage: React.FC = () => {
               </div>
 
               <div>
-              <div className="flex items-center justify-between mb-1">
-                <label htmlFor="password" className="block text-sm font-medium text-white">
-                  Password
-                </label>
-              </div>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="••••••••"
-                  disabled={loading}
-                />
-                <button 
-                  type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
-                  onClick={togglePasswordVisibility}
-                >
-                  {showPassword ? (
-                    <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                  ) : (
-                    <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
-                </button>
-              </div>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="password" className="block text-sm font-medium text-white">
+                    Password
+                  </label>
+                </div>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="••••••••"
+                    disabled={loading}
+                  />
+                  <button 
+                    type="button"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                    onClick={togglePasswordVisibility}
+                    disabled={loading}
+                  >
+                    {showPassword ? (
+                      <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    ) : (
+                      <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
 
-              <div className="flex items-center">
-                <input
-                  id="remember-me"
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  disabled={loading}
-                />
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-700">
-                  Remember me
-                </label>
-              </div>
+                <div className="flex items-center mt-2">
+                  <input
+                    id="remember-me"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    disabled={loading}
+                  />
+                  <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-700">
+                    Remember me
+                  </label>
+                </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition duration-200 disabled:opacity-50"
+                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={loading}
               >
                 {loading ? 'Signing In...' : 'Sign In'}
@@ -267,7 +298,7 @@ const LoginPage: React.FC = () => {
 
               <button
                 onClick={handleGoogleLogin}
-                className="mt-4 w-full flex text-black items-center justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white hover:bg-gray-50 transition duration-200 disabled:opacity-50"
+                className="mt-4 w-full flex text-black items-center justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white hover:bg-gray-50 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={loading}
               >
                 <svg className="h-5 w-5 mr-2" viewBox="0 0 24 24" width="24" height="24">

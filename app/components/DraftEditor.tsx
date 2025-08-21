@@ -4,6 +4,7 @@ import { Course, ModalState, Module } from '@/types';
 import { ColorPicker } from './ColorPicker';
 import { EmojiPicker } from './EmojiPicker';
 import { PreviewGenerator } from './PreviewGenerator';
+import { FontStylePicker } from './FontStylePicker';
 import 'draft-js/dist/Draft.css';
 import '@/DraftEditor.module.css';
 
@@ -18,6 +19,7 @@ interface DraftEditorComponentProps {
     textColors: string[];
     highlightColors: string[];
     textAlignOptions: readonly string[];
+    fontFamilies: Array<{ name: string; value: string; preview: string }>;
     handleEditorStateChange: (moduleIndex: number, newEditorState: EditorState) => void;
     getEditorState: (moduleIndex: number) => EditorState;
     setEditorRef: (moduleIndex: number, ref: Editor | null) => void;
@@ -30,6 +32,7 @@ interface DraftEditorComponentProps {
     handleLinkToggle: (moduleIndex: number) => void;
     handleTextColor: (moduleIndex: number, color: string) => void;
     handleTextHighlight: (moduleIndex: number, color: string) => void;
+    handleFontFamily: (moduleIndex: number, fontFamily: string) => void;
     handleTextAlignment: (moduleIndex: number, alignment: string) => void;
     handleColorPicker: (moduleIndex: number, type: 'text' | 'highlight') => void;
     formatText: (moduleIndex: number, format: string) => void;
@@ -40,6 +43,7 @@ interface DraftEditorComponentProps {
     getCurrentTextAlignment: (moduleIndex: number) => string;
     getCurrentTextColor: (moduleIndex: number) => string | null;
     getCurrentHighlightColor: (moduleIndex: number) => string | null;
+    getCurrentFontFamily: (moduleIndex: number) => string | null;
     isUploading: (moduleIndex: number) => boolean;
   };
   formData: Course;
@@ -51,6 +55,8 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
   moduleIndex,
   module,
   editorHook,
+  formData,
+  setFormData,
   setModal,
 }) => {
   const [showPreview, setShowPreview] = useState(false);
@@ -61,11 +67,11 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
     async (mediaType: 'image' | 'video' | 'gif') => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = 
-        mediaType === 'image' 
-          ? 'image/jpeg,image/png,image/webp' 
-          : mediaType === 'video' 
-          ? 'video/mp4,video/webm,video/mov' 
+      input.accept =
+        mediaType === 'image'
+          ? 'image/jpeg,image/png,image/webp'
+          : mediaType === 'video'
+          ? 'video/mp4,video/webm,video/mov'
           : 'image/gif';
 
       input.onchange = async () => {
@@ -91,7 +97,7 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
               break;
           }
         } catch (error) {
-          console.error('Upload error:', error);
+          console.error(`Upload error for ${mediaType}:`, error);
           setModal({
             isOpen: true,
             status: 'error',
@@ -111,17 +117,13 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
     if (!originalUrl) return;
 
     let embedUrl = originalUrl;
-    
-    // YouTube URL processing
     if (originalUrl.includes('youtube.com/watch?v=')) {
       const videoId = originalUrl.split('v=')[1]?.split('&')[0];
       if (videoId) embedUrl = `https://www.youtube.com/embed/${videoId}`;
     } else if (originalUrl.includes('youtu.be/')) {
       const videoId = originalUrl.split('youtu.be/')[1]?.split('?')[0];
       if (videoId) embedUrl = `https://www.youtube.com/embed/${videoId}`;
-    } 
-    // Vimeo URL processing
-    else if (originalUrl.includes('vimeo.com/')) {
+    } else if (originalUrl.includes('vimeo.com/')) {
       const videoId = originalUrl.split('vimeo.com/')[1]?.split('/')[0];
       if (videoId) embedUrl = `https://player.vimeo.com/video/${videoId}`;
     }
@@ -163,6 +165,23 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
     [editorState, moduleIndex, editorHook, setModal]
   );
 
+  // Enhanced font family handler with validation
+  const handleEnhancedFontFamily = useCallback(
+    (fontFamily: string) => {
+      const selection = editorState.getSelection();
+      if (selection.isCollapsed()) {
+        setModal({
+          isOpen: true,
+          status: 'error',
+          message: 'Please select text to apply font family',
+        });
+        return;
+      }
+      editorHook.handleFontFamily(moduleIndex, fontFamily);
+    },
+    [editorState, moduleIndex, editorHook, setModal]
+  );
+
   // Enhanced clear formatting with validation
   const handleEnhancedClearFormatting = useCallback(() => {
     const selection = editorState.getSelection();
@@ -187,6 +206,7 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
           <button
             onClick={() => setShowPreview(!showPreview)}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            type="button"
           >
             {showPreview ? 'Edit' : 'Preview'}
           </button>
@@ -283,6 +303,28 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
               </button>
             </div>
 
+            {/* Font Family Picker */}
+            <FontStylePicker
+              currentFont={editorHook.getCurrentFontFamily(moduleIndex)}
+              onFontSelect={handleEnhancedFontFamily}
+              disabled={editorHook.isUploading(moduleIndex)}
+            />
+
+            {/* Text Alignment */}
+            <select
+              value={editorHook.getCurrentTextAlignment(moduleIndex)}
+              onChange={(e) => editorHook.handleTextAlignment(moduleIndex, e.target.value)}
+              className="px-3 py-1 rounded text-sm bg-gray-800 text-gray-50 border border-gray-600 hover:bg-gray-700"
+              disabled={editorHook.isUploading(moduleIndex)}
+              title="Text alignment"
+            >
+              {editorHook.textAlignOptions.map((align) => (
+                <option key={align} value={align}>
+                  {align.charAt(0).toUpperCase() + align.slice(1)}
+                </option>
+              ))}
+            </select>
+
             {/* Colors */}
             <ColorPicker
               colors={editorHook.textColors}
@@ -302,6 +344,7 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
               type="highlight"
             />
 
+            {/* Clear Formatting */}
             <button
               onClick={handleEnhancedClearFormatting}
               className="px-3 py-1 rounded text-sm bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
@@ -312,7 +355,7 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
             </button>
 
             {/* Media Upload */}
-            <div className="flex items-center gap-1 bg-white rounded p-1 border">
+            <div className="flex items-center gap-1 bg-gray-800 rounded p-1 border">
               <button
                 onClick={() => handleEnhancedMediaUpload('image')}
                 className="px-3 py-1 rounded text-sm bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
@@ -352,7 +395,9 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
             </div>
 
             {/* Additional Tools */}
-            <EmojiPicker onEmojiSelect={(emoji) => editorHook.handleEmojiInsert(moduleIndex, emoji)} />
+            <EmojiPicker
+              onEmojiSelect={(emoji) => editorHook.handleEmojiInsert(moduleIndex, emoji)}
+            />
 
             {editorHook.isUploading(moduleIndex) && (
               <div className="flex items-center px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm">
@@ -373,7 +418,7 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
             </div>
           </div>
         ) : (
-          <div className="border rounded-lg bg-gray-800  min-h-96">
+          <div className="border rounded-lg bg-gray-800 min-h-96">
             <div className="p-4 relative">
               <Editor
                 ref={(ref) => editorHook.setEditorRef(moduleIndex, ref)}
@@ -387,10 +432,10 @@ export const DraftEditorComponent: React.FC<DraftEditorComponentProps> = ({
               />
 
               {editorHook.isUploading(moduleIndex) && (
-                <div className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center">
+                <div className="absolute inset-0 bg-gray-800 bg-opacity-90 flex items-center justify-center">
                   <div className="flex flex-col items-center">
                     <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm text-gray-600 mt-2">Uploading...</p>
+                    <p className="text-sm text-gray-50 mt-2">Uploading...</p>
                   </div>
                 </div>
               )}
