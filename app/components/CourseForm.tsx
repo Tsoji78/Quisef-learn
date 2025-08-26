@@ -9,6 +9,8 @@ import FeedbackModal from './FeedbackModal';
 import DeleteModal from './DeleteModal';
 import { Course, ModalState } from '../types';
 import { Editor, EditorState, ContentBlock, RawDraftContentState } from 'draft-js';
+import { DraftSaver } from './DraftSaver';
+import { useDraftSaving } from '@/hooks/useDraftSaving';
 
 interface ValidationErrors {
   [key: string]: string;
@@ -89,6 +91,8 @@ interface CourseFormProps {
   courseActions: CourseActions;
   draftEditorState: DraftEditorState;
   draftEditorActions: DraftEditorActions;
+  user: any; // Add this
+  courseId: string | null; // Add this
 }
 
 // Memoized sub-components
@@ -478,8 +482,18 @@ export default function CourseForm({
   courseActions,
   draftEditorState,
   draftEditorActions,
+  user, // Add this
+  courseId,
 }: CourseFormProps) {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+   // Add the draft manager hook
+  const draftSaver = useDraftSaving({
+    user: user, // You'll need to pass user from CourseManagementPage
+    courseId: courseId, // You'll need to pass courseId from CourseManagementPage
+    autoSaveInterval: 30000, // 30 seconds
+    maxDraftVersions: 5,
+  });
 
   const validateStep1 = useCallback(() => {
     const newErrors: ValidationErrors = {};
@@ -612,6 +626,14 @@ export default function CourseForm({
           </Link>
         </div>
       </div>
+
+      <DraftSaver
+      formData={formData}
+      user={user} // Pass user prop
+      courseId={courseId} // Pass courseId prop
+      draftEditorActions={draftEditorActions}
+      className="mb-6"
+      />
 
       {errors.general && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4" role="alert">

@@ -1,557 +1,864 @@
-"use client"
-import { useState, useRef, ChangeEvent, useEffect } from 'react';
-import Head from 'next/head';
-import { FiUpload, FiCopy, FiCheckCircle, FiX, FiImage, FiVideo, FiFileText, FiLink, FiCode, FiDownload } from 'react-icons/fi';
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+"use client";
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation'; // Import useRouter for navigation
+import { 
+  Upload, 
+  Plus, 
+  Edit3, 
+  Trash2, 
+  Link, 
+  Image, 
+  Video, 
+  FileText,
+  Check,
+  X,
+  Play,
+  ExternalLink,
+  Youtube,
+  Copy,
+  CheckCircle,
+  Code,
+  Download,
+  Globe,
+  ArrowLeft // Added ArrowLeft icon for the back button
+} from 'lucide-react';
 
-// Define types for our media items
+// Types
 interface MediaItem {
   id: string;
   name: string;
   url: string;
-  type: 'image' | 'video' | 'gif';
+  type: 'image' | 'video' | 'gif' | 'youtube' | 'vimeo' | 'external';
   timestamp: Date;
   embedCode: string;
   fileSize: number;
   publicId: string;
+  thumbnailUrl?: string;
+  isExternal?: boolean;
 }
 
-// Enhanced Cloudinary upload function
-export const uploadToCloudinary = async (file: File, resourceType: 'image' | 'video', customName?: string): Promise<{url: string, publicId: string}> => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || '');
-  
-  if (customName) {
-    formData.append('public_id', customName);
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/${resourceType}/upload`,
-      {
-        method: 'POST',
-        body: formData,
-      }
-    );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Cloudinary upload failed: ${errorData.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    return {
-      url: data.secure_url,
-      publicId: data.public_id
-    };
-  } catch (error) {
-    throw new Error(`Cloudinary upload error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
+// Utility functions
+const getYouTubeVideoId = (url: string): string | null => {
+  const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const match = url.match(regex);
+  return match ? match[1] : null;
 };
 
-// Custom hook for clipboard functionality
-const useCopyToClipboard = () => {
+const getVimeoVideoId = (url: string): string | null => {
+  const regex = /vimeo\.com\/(\d+)/;
+  const match = url.match(regex);
+  return match ? match[1] : null;
+};
+
+const detectMediaType = (url: string) => {
+  const youtubeId = getYouTubeVideoId(url);
+  if (youtubeId) {
+    return {
+      type: 'youtube' as const,
+      embedCode: `<iframe width="560" height="315" src="https://www.youtube.com/embed/${youtubeId}" frameborder="0" allowfullscreen></iframe>`,
+      thumbnailUrl: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`
+    };
+  }
+
+  const vimeoId = getVimeoVideoId(url);
+  if (vimeoId) {
+    return {
+      type: 'vimeo' as const,
+      embedCode: `<iframe src="https://player.vimeo.com/video/${vimeoId}" width="560" height="315" frameborder="0" allowfullscreen></iframe>`,
+      thumbnailUrl: `https://vumbnail.com/${vimeoId}.jpg`
+    };
+  }
+
+  const extension = url.split('.').pop()?.toLowerCase();
+  if (['mp4', 'webm', 'ogg', 'mov'].includes(extension || '')) {
+    return {
+      type: 'video' as const,
+      embedCode: `<video controls style="max-width: 100%; height: auto;"><source src="${url}" type="video/${extension}">Your browser does not support the video tag.</video>`
+    };
+  }
+
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(extension || '')) {
+    const type = extension === 'gif' ? 'gif' : 'image';
+    return {
+      type: type as 'image' | 'gif',
+      embedCode: `<img src="${url}" alt="External image" style="max-width: 100%; height: auto;" />`
+    };
+  }
+
+  return {
+    type: 'external' as const,
+    embedCode: `<a href="${url}" target="_blank">${url}</a>`
+  };
+};
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
+// Cloudinary upload function
+const uploadToCloudinary = async (file: File): Promise<{url: string, publicId: string, thumbnailUrl?: string}> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', 'your_upload_preset'); // Replace with your Cloudinary upload preset
+  
+  const isVideo = file.type.startsWith('video/');
+  const endpoint = isVideo 
+    ? `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/video/upload`
+    : `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  
+  return {
+    url: result.secure_url,
+    publicId: result.public_id,
+    thumbnailUrl: isVideo ? result.secure_url.replace(/\.[^/.]+$/, ".jpg") : undefined
+  };
+};
+
+// Components
+const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 'error' | 'info'; onClose: () => void }) => (
+  <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white ${
+    type === 'success' ? 'bg-green-500' : 
+    type === 'error' ? 'bg-red-500' : 'bg-blue-500'
+  }`}>
+    <div className="flex items-center justify-between">
+      <span>{message}</span>
+      <button onClick={onClose} className="ml-4">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  </div>
+);
+
+const UploadDropZone = ({ 
+  onUpload, 
+  onAddUrl, 
+  uploading, 
+  fileInputRef 
+}: { 
+  onUpload: (files: File[]) => void;
+  onAddUrl: (url: string, name?: string) => void;
+  uploading: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement>;
+}) => {
+  const [dragOver, setDragOver] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [url, setUrl] = useState('');
+  const [urlName, setUrlName] = useState('');
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      onUpload(files);
+    }
+  }, [onUpload]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      onUpload(files);
+    }
+    e.target.value = '';
+  }, [onUpload]);
+
+  const handleAddUrl = () => {
+    if (url.trim()) {
+      onAddUrl(url.trim(), urlName.trim() || undefined);
+      setUrl('');
+      setUrlName('');
+      setShowUrlInput(false);
+    }
+  };
+
+  return (
+    <div className="mb-8">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+          dragOver 
+            ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' 
+            : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800/70'
+        }`}
+      >
+        {uploading ? (
+          <div className="space-y-4">
+            <div className="animate-spin mx-auto w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full"></div>
+            <p className="text-gray-600 dark:text-gray-300">Uploading to Cloudinary...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Upload className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto" />
+            <div>
+              <p className="text-xl font-medium text-gray-800 dark:text-gray-200 mb-2">
+                Drop files here or click to browse
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Support for images, videos, and GIFs
+              </p>
+            </div>
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg flex items-center transition-colors"
+              >
+                <Plus className="mr-2 w-4 h-4" />
+                Choose Files
+              </button>
+              <button
+                onClick={() => setShowUrlInput(!showUrlInput)}
+                className="bg-gray-600 dark:bg-gray-700 hover:bg-gray-700 dark:hover:bg-gray-600 text-gray-100 dark:text-gray-200 px-6 py-2 rounded-lg flex items-center transition-colors"
+              >
+                <Globe className="mr-2 w-4 h-4" />
+                Add URL
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showUrlInput && (
+        <div className="mt-4 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+          <input
+            type="url"
+            placeholder="Enter URL (YouTube, Vimeo, or direct media link)"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <input
+            type="text"
+            placeholder="Custom name (optional)"
+            value={urlName}
+            onChange={(e) => setUrlName(e.target.value)}
+            className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-800 dark:text-gray-200 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleAddUrl}
+              disabled={!url.trim()}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 text-white px-4 py-2 rounded transition-colors"
+            >
+              Add Media
+            </button>
+            <button
+              onClick={() => setShowUrlInput(false)}
+              className="bg-gray-500 dark:bg-gray-600 hover:bg-gray-600 dark:hover:bg-gray-700 text-white px-4 py-2 rounded transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,video/*"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
+    </div>
+  );
+};
+
+const MediaCard = ({ 
+  item, 
+  onDelete, 
+  onEdit, 
+  onShowEmbed, 
+  editingItem, 
+  setEditingItem 
+}: {
+  item: MediaItem;
+  onDelete: (id: string) => void;
+  onEdit: (id: string, name: string) => void;
+  onShowEmbed: (item: MediaItem) => void;
+  editingItem: string | null;
+  setEditingItem: (id: string | null) => void;
+}) => {
+  const [editName, setEditName] = useState('');
+
+  const getFileIcon = (type: string) => {
+    switch (type) {
+      case 'image': return <Image className="text-blue-400 w-3 h-3" />;
+      case 'video': return <Video className="text-red-400 w-3 h-3" />;
+      case 'gif': return <Image className="text-green-400 w-3 h-3" />;
+      case 'youtube': return <Youtube className="text-red-500 w-3 h-3" />;
+      case 'vimeo': return <Video className="text-blue-500 w-3 h-3" />;
+      case 'external': return <ExternalLink className="text-purple-400 w-3 h-3" />;
+      default: return <FileText className="text-gray-400 w-3 h-3" />;
+    }
+  };
+
+  const handleStartEdit = () => {
+    setEditName(item.name);
+    setEditingItem(item.id);
+  };
+
+  const handleSaveEdit = () => {
+    if (editName.trim()) {
+      onEdit(item.id, editName.trim());
+    }
+    setEditingItem(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingItem(null);
+    setEditName('');
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 border border-gray-200 dark:border-gray-700">
+      {/* Media Preview */}
+      <div className="relative h-48 bg-gray-100 dark:bg-gray-700 rounded-t-lg overflow-hidden">
+        {item.type === 'youtube' && item.thumbnailUrl ? (
+          <div className="relative w-full h-full">
+            <img
+              src={item.thumbnailUrl}
+              alt={item.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+              <div className="bg-red-600 rounded-full p-3">
+                <Play className="w-8 h-8 text-white" />
+              </div>
+            </div>
+          </div>
+        ) : item.type === 'vimeo' && item.thumbnailUrl ? (
+          <div className="relative w-full h-full">
+            <img
+              src={item.thumbnailUrl}
+              alt={item.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+              <div className="bg-blue-600 rounded-full p-3">
+                <Play className="w-8 h-8 text-white" />
+              </div>
+            </div>
+          </div>
+        ) : item.type === 'video' ? (
+          <div className="relative w-full h-full">
+            <video
+              src={item.url}
+              className="w-full h-full object-cover"
+              preload="metadata"
+            />
+            <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+              <Play className="w-12 h-12 text-white opacity-80" />
+            </div>
+          </div>
+        ) : item.type === 'external' ? (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/50 dark:to-purple-800/50">
+            <div className="text-center">
+              <ExternalLink className="w-16 h-16 text-purple-500 dark:text-purple-400 mx-auto mb-2" />
+              <p className="text-sm text-purple-600 dark:text-purple-300 font-medium">External Link</p>
+            </div>
+          </div>
+        ) : (
+          <img
+            src={item.url}
+            alt={item.name}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        )}
+        
+        {/* Type Badge */}
+        <div className="absolute top-2 left-2 bg-black bg-opacity-80 text-white px-2 py-1 rounded text-xs flex items-center">
+          {getFileIcon(item.type)}
+          <span className="ml-1 capitalize">{item.type}</span>
+        </div>
+        
+        {/* Cloudinary Badge */}
+        {!item.isExternal && (
+          <div className="absolute top-2 right-2 bg-orange-600 text-white px-2 py-1 rounded text-xs font-medium">
+            Cloudinary
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="p-4">
+        {/* Title and Edit */}
+        <div className="mb-3">
+          {editingItem === item.id ? (
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="flex-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') handleSaveEdit();
+                  if (e.key === 'Escape') handleCancelEdit();
+                }}
+                autoFocus
+              />
+              <button
+                onClick={handleSaveEdit}
+                className="text-green-500 hover:text-green-400 p-1"
+              >
+                <Check className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleCancelEdit}
+                className="text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <h3 className="font-medium text-gray-800 dark:text-gray-200 truncate" title={item.name}>
+              {item.name}
+            </h3>
+          )}
+        </div>
+
+        {/* Metadata */}
+        <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-4">
+          <span>{item.isExternal ? 'External' : formatFileSize(item.fileSize)}</span>
+          <span>{new Date(item.timestamp).toLocaleDateString()}</span>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center justify-between">
+          <div className="flex space-x-2">
+            <button
+              onClick={handleStartEdit}
+              className="text-blue-500 hover:text-blue-400 p-1 rounded transition-colors"
+              title="Edit name"
+            >
+              <Edit3 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onDelete(item.id)}
+              className="text-red-500 hover:text-red-400 p-1 rounded transition-colors"
+              title="Delete"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <button
+            onClick={() => onShowEmbed(item)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs flex items-center transition-colors"
+          >
+            <Link className="w-3 h-3 mr-1" />
+            Embed
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const EmbedPanel = ({ item, onClose }: { item: MediaItem; onClose: () => void }) => {
   const [copied, setCopied] = useState<string | null>(null);
 
-  const copyToClipboard = async (text: string) => {
+  const copyToClipboard = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(text);
       setTimeout(() => setCopied(null), 2000);
-      toast.success('Copied to clipboard!');
-      return true;
     } catch (error) {
-      console.error('Failed to copy text: ', error);
-      toast.error('Failed to copy. Try again.');
-      return false;
+      console.error('Failed to copy:', error);
     }
   };
 
-  return { copied, copyToClipboard };
-};
-
-// Client-side storage utilities
-const STORAGE_KEY = 'stream_media_items';
-
-const saveToClientStorage = (items: MediaItem[]) => {
-  try {
-    const itemsToStore = items.map(item => ({
-      ...item,
-      timestamp: item.timestamp.toISOString()
-    }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(itemsToStore));
-  } catch (error) {
-    console.error('Failed to save to localStorage:', error);
-  }
-};
-
-const loadFromClientStorage = (): MediaItem[] => {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const items = JSON.parse(stored);
-      return items.map((item: any) => ({
-        ...item,
-        timestamp: new Date(item.timestamp)
-      }));
+  const generateMarkdown = () => {
+    if (item.type === 'video' || item.type === 'youtube' || item.type === 'vimeo') {
+      return `[![${item.name}](${item.thumbnailUrl || item.url})](${item.url})`;
     }
-  } catch (error) {
-    console.error('Failed to load from localStorage:', error);
-  }
-  return [];
-};
-
-export default function MediaUploadHub() {
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [customName, setCustomName] = useState('');
-  const [dragActive, setDragActive] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const { copied, copyToClipboard } = useCopyToClipboard();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Load saved media items on component mount
-  useEffect(() => {
-    const savedItems = loadFromClientStorage();
-    setMediaItems(savedItems);
-  }, []);
-
-  // Save media items whenever the list changes
-  useEffect(() => {
-    if (mediaItems.length > 0) {
-      saveToClientStorage(mediaItems);
-    }
-  }, [mediaItems]);
-
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
+    return `![${item.name}](${item.url})`;
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFiles(e.dataTransfer.files);
+  const getEmbedUrl = (item: MediaItem) => {
+    if (item.type === 'youtube') {
+      const youtubeId = getYouTubeVideoId(item.url);
+      return youtubeId ? `https://www.youtube.com/embed/${youtubeId}` : item.url;
     }
-  };
-
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      handleFiles(e.target.files);
+    if (item.type === 'vimeo') {
+      const vimeoId = getVimeoVideoId(item.url);
+      return vimeoId ? `https://player.vimeo.com/video/${vimeoId}` : item.url;
     }
-  };
-
-  const handleFiles = (files: FileList) => {
-    const fileArray = Array.from(files);
-    setSelectedFiles(fileArray);
-    
-    // If only one file is selected, use its name as the default custom name
-    if (fileArray.length === 1 && !customName) {
-      const fileName = fileArray[0].name.split('.').slice(0, -1).join('.');
-      setCustomName(fileName);
-    }
-  };
-
-  const startUpload = () => {
-    if (selectedFiles.length === 0) {
-      toast.error('Please select files to upload first');
-      return;
-    }
-    
-    selectedFiles.forEach(file => {
-      uploadFile(file);
-    });
-    
-    // Clear selected files after upload starts
-    setSelectedFiles([]);
-  };
-
-  const uploadFile = async (file: File) => {
-    setUploading(true);
-    setUploadProgress(0);
-
-    // Determine resource type and file type
-    let resourceType: 'image' | 'video' = 'image';
-    let fileType: 'image' | 'video' | 'gif' = 'image';
-    
-    if (file.type.includes('video')) {
-      resourceType = 'video';
-      fileType = 'video';
-    } else if (file.name.toLowerCase().endsWith('.gif')) {
-      fileType = 'gif';
-    }
-
-    // Progress simulation
-    const progressInterval = setInterval(() => {
-      setUploadProgress(prev => {
-        const newProgress = prev + 10;
-        return newProgress >= 90 ? 90 : newProgress;
-      });
-    }, 500);
-
-    try {
-      const result = await uploadToCloudinary(file, resourceType, customName);
-      
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-
-      // Generate embed code based on file type
-      let embedCode = '';
-      if (fileType === 'image' || fileType === 'gif') {
-        embedCode = `<img src="${result.url}" alt="${customName || file.name}" style="max-width: 100%; height: auto;" />`;
-      } else if (fileType === 'video') {
-        embedCode = `<video controls style="max-width: 100%; height: auto;"><source src="${result.url}" type="${file.type}">Your browser does not support the video tag.</video>`;
-      }
-
-      const newItem: MediaItem = {
-        id: result.publicId || Date.now().toString(),
-        name: customName || file.name,
-        url: result.url,
-        type: fileType,
-        timestamp: new Date(),
-        embedCode: embedCode,
-        fileSize: file.size,
-        publicId: result.publicId
-      };
-
-      setMediaItems(prev => [newItem, ...prev]);
-      setCustomName('');
-      toast.success(`"${newItem.name}" uploaded successfully!`);
-    } catch (error) {
-      clearInterval(progressInterval);
-      console.error('Error uploading file:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Upload failed. Please check your Cloudinary credentials.';
-      toast.error(errorMessage);
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  };
-
-  const removeItem = (id: string) => {
-    setMediaItems(prev => {
-      const updated = prev.filter(item => item.id !== id);
-      // Update localStorage
-      if (updated.length === 0) {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-      return updated;
-    });
-    toast.info('Media item removed');
-  };
-
-  const clearAllItems = () => {
-    if (window.confirm('Are you sure you want to clear all media items? This cannot be undone.')) {
-      setMediaItems([]);
-      localStorage.removeItem(STORAGE_KEY);
-      toast.info('All media items cleared');
-    }
-  };
-
-  const exportMediaList = () => {
-    const dataStr = JSON.stringify(mediaItems, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    
-    const exportFileDefaultName = `media-list-${new Date().toISOString().split('T')[0]}.json`;
-    
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
-    linkElement.setAttribute('download', exportFileDefaultName);
-    linkElement.click();
-    
-    toast.success('Media list exported successfully!');
-  };
-
-  // Get file type icon
-  const getFileIcon = (type: string) => {
-    switch (type) {
-      case 'image':
-        return <FiImage className="text-blue-500" />;
-      case 'video':
-        return <FiVideo className="text-red-500" />;
-      case 'gif':
-        return <FiImage className="text-green-500" />;
-      default:
-        return <FiFileText className="text-gray-500" />;
-    }
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return item.url;
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Head>
-        <title>Stream Media Upload Hub</title>
-        <meta name="description" content="Upload and manage your stream media files" />
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 h-fit sticky top-8">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+        <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Embed & Share</h3>
+        <button
+          onClick={onClose}
+          className="text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
 
-      <ToastContainer position="top-right" autoClose={3000} />
-
-      <main className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Stream Media Upload Hub</h1>
-          <div className="flex gap-2">
-            {mediaItems.length > 0 && (
-              <>
-                <button
-                  onClick={exportMediaList}
-                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md flex items-center text-sm"
-                >
-                  <FiDownload className="mr-2" />
-                  Export List
-                </button>
-                <button
-                  onClick={clearAllItems}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm"
-                >
-                  Clear All
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-        
-        {/* Upload section */}
-        <div className="mb-8">
-          <div
-            className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
-              dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-            }`}
-            onDragEnter={handleDrag}
-            onDragOver={handleDrag}
-            onDragLeave={handleDrag}
-            onDrop={handleDrop}
-          >
-            <div className="flex flex-col items-center">
-              <div className="mb-4">
-                <FiUpload size={48} className="text-gray-400" />
-              </div>
-              <p className="text-xl font-medium text-gray-700 mb-2">
-                Drag and drop your files here
-              </p>
-              <p className="text-sm text-gray-500 mb-6">
-                or click to browse (Images, Videos, GIFs)
-              </p>
-              
-              <div className="flex flex-col sm:flex-row gap-4 items-center w-full max-w-md">
-                <input
-                  type="text"
-                  placeholder="Custom name (optional)"
-                  className="border border-gray-300 rounded-md px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                />
-                
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md flex items-center transition-colors"
-                  disabled={uploading}
-                >
-                  <FiUpload className="mr-2" />
-                  Select Files
-                </button>
-                
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*,video/*,.gif"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-              </div>
-              
-              {/* Selected files preview */}
-              {selectedFiles.length > 0 && (
-                <div className="mt-6 w-full max-w-2xl">
-                  <p className="text-sm font-medium text-gray-700 mb-2">
-                    {selectedFiles.length} file(s) selected:
-                  </p>
-                  <ul className="bg-white rounded-md border border-gray-200 divide-y divide-gray-200 text-left max-h-40 overflow-y-auto">
-                    {selectedFiles.map((file, index) => (
-                      <li key={index} className="px-4 py-2 flex items-center justify-between">
-                        <div className="flex items-center min-w-0 flex-1">
-                          {file.type.includes('image') ? <FiImage className="text-blue-500 mr-2 flex-shrink-0" /> : 
-                           file.type.includes('video') ? <FiVideo className="text-red-500 mr-2 flex-shrink-0" /> : 
-                           <FiFileText className="text-green-500 mr-2 flex-shrink-0" />}
-                          <span className="text-sm truncate" title={file.name}>{file.name}</span>
-                        </div>
-                        <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
-                          {formatFileSize(file.size)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  
-                  <button
-                    type="button"
-                    onClick={startUpload}
-                    className="mt-4 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md flex items-center justify-center w-full transition-colors"
-                    disabled={uploading}
-                  >
-                    {uploading ? (
-                      'Uploading...'
-                    ) : (
-                      <>
-                        <span className="mr-2">Upload to Cloudinary</span>
-                        <FiUpload />
-                      </>
-                    )}
-                  </button>
+      {/* Media Preview */}
+      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="relative w-full h-32 bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden mb-3">
+          {item.type === 'youtube' && item.thumbnailUrl ? (
+            <div className="relative w-full h-full">
+              <img src={item.thumbnailUrl} alt={item.name} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+                <div className="bg-red-600 rounded-full p-2">
+                  <Play className="w-6 h-6 text-white" />
                 </div>
-              )}
-            </div>
-          </div>
-          
-          {/* Upload progress */}
-          {uploading && (
-            <div className="mt-4">
-              <div className="w-full bg-gray-200 rounded-full h-2.5">
-                <div 
-                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                  style={{ width: `${uploadProgress}%` }}
-                ></div>
               </div>
-              <p className="text-sm text-gray-600 mt-2 text-center">
-                Uploading... {uploadProgress}%
-              </p>
             </div>
+          ) : item.type === 'external' ? (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/50 dark:to-purple-800/50">
+              <ExternalLink className="w-12 h-12 text-purple-500 dark:text-purple-400" />
+            </div>
+          ) : (
+            <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
           )}
         </div>
         
-        {/* Media gallery */}
+        <h4 className="font-medium text-gray-800 dark:text-gray-200 truncate">{item.name}</h4>
+        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <span className="capitalize">{item.type}</span>
+          {!item.isExternal && <span className="ml-2">{formatFileSize(item.fileSize)}</span>}
+          {item.publicId && (
+            <span className="ml-2 text-orange-500">• Cloudinary</span>
+          )}
+        </div>
+      </div>
+
+      {/* Links */}
+      <div className="p-4 space-y-4">
+        {/* Direct URL */}
         <div>
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">
-            Your Stream Media ({mediaItems.length})
-          </h2>
-          
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <Link className="w-4 h-4 inline mr-1" />
+            Direct URL
+          </label>
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={item.url}
+              readOnly
+              className="flex-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-sm text-gray-700 dark:text-gray-300"
+            />
+            <button
+              onClick={() => copyToClipboard(item.url, 'URL')}
+              className="text-blue-500 hover:text-blue-400 transition-colors p-2"
+            >
+              {copied === item.url ? (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* HTML Embed */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <Code className="w-4 h-4 inline mr-1" />
+            Embed URL
+          </label>
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={getEmbedUrl(item)}
+              readOnly
+              className="flex-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono"
+            />
+            <button
+              onClick={() => copyToClipboard(getEmbedUrl(item), 'Embed URL')}
+              className="text-blue-500 hover:text-blue-400 transition-colors p-2"
+            >
+              {copied === getEmbedUrl(item) ? (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Full HTML Embed */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <Code className="w-4 h-4 inline mr-1" />
+            Full HTML Embed
+          </label>
+          <div className="flex items-start space-x-2">
+            <textarea
+              value={item.embedCode}
+              readOnly
+              className="flex-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono"
+              rows={3}
+            />
+            <button
+              onClick={() => copyToClipboard(item.embedCode, 'HTML')}
+              className="text-blue-500 hover:text-blue-400 transition-colors p-2"
+            >
+              {copied === item.embedCode ? (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Markdown */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Markdown</label>
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={generateMarkdown()}
+              readOnly
+              className="flex-1 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono"
+            />
+            <button
+              onClick={() => copyToClipboard(generateMarkdown(), 'Markdown')}
+              className="text-blue-500 hover:text-blue-400 transition-colors p-2"
+            >
+              {copied === generateMarkdown() ? (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-b-lg">
+        <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+          Uploaded {new Date(item.timestamp).toLocaleDateString()}
+          {item.publicId && <span className="text-orange-500"> • Via Cloudinary</span>}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Main MediaManager Component
+const MediaManager = () => {
+  const router = useRouter(); // Initialize useRouter for navigation
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null) as React.RefObject<HTMLInputElement>;
+
+  // Generate unique ID
+  const generateId = () => {
+    return Math.random().toString(36).substr(2, 9);
+  };
+
+  // Handle file upload
+  const handleUpload = async (files: File[]) => {
+    setUploading(true);
+    try {
+      const uploadedItems: MediaItem[] = [];
+      for (const file of files) {
+        const { url, publicId, thumbnailUrl } = await uploadToCloudinary(file);
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        const type = ['mp4', 'webm', 'ogg', 'mov'].includes(extension || '')
+          ? 'video'
+          : extension === 'gif'
+          ? 'gif'
+          : 'image';
+        const embedCode = type === 'video'
+          ? `<video controls style="max-width: 100%; height: auto;"><source src="${url}" type="video/${extension}">Your browser does not support the video tag.</video>`
+          : `<img src="${url}" alt="${file.name}" style="max-width: 100%; height: auto;" />`;
+
+        uploadedItems.push({
+          id: generateId(),
+          name: file.name,
+          url,
+          type,
+          timestamp: new Date(),
+          embedCode,
+          fileSize: file.size,
+          publicId,
+          thumbnailUrl,
+        });
+      }
+      setMediaItems((prev) => [...uploadedItems, ...prev]);
+      setToast({ message: `${files.length} file(s) uploaded successfully`, type: 'success' });
+    } catch (error) {
+      setToast({ message: 'Failed to upload files', type: 'error' });
+      console.error('Upload error:', error);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Handle URL addition
+  const handleAddUrl = (url: string, name?: string) => {
+    try {
+      const { type, embedCode, thumbnailUrl } = detectMediaType(url);
+      const mediaItem: MediaItem = {
+        id: generateId(),
+        name: name || url.split('/').pop() || 'External Media',
+        url,
+        type,
+        timestamp: new Date(),
+        embedCode,
+        fileSize: 0,
+        publicId: '',
+        thumbnailUrl,
+        isExternal: true,
+      };
+      setMediaItems((prev) => [mediaItem, ...prev]);
+      setToast({ message: 'URL added successfully', type: 'success' });
+    } catch (error) {
+      setToast({ message: 'Failed to add URL', type: 'error' });
+      console.error('Add URL error:', error);
+    }
+  };
+
+  // Handle delete
+  const handleDelete = async (id: string) => {
+    const item = mediaItems.find((item) => item.id === id);
+    if (!item) return;
+
+    if (!item.isExternal && item.publicId) {
+      try {
+        // Optional: Add Cloudinary deletion API call
+        // await fetch(`https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/resources/image/upload/${item.publicId}`, {
+        //   method: 'DELETE',
+        //   headers: {
+        //     Authorization: `Basic ${btoa(`${process.env.CLOUDINARY_API_KEY}:${process.env.CLOUDINARY_API_SECRET}`)}`
+        //   }
+        // });
+        setMediaItems((prev) => prev.filter((item) => item.id !== id));
+        setToast({ message: 'Media deleted successfully', type: 'success' });
+      } catch (error) {
+        setToast({ message: 'Failed to delete media', type: 'error' });
+        console.error('Delete error:', error);
+      }
+    } else {
+      setMediaItems((prev) => prev.filter((item) => item.id !== id));
+      setToast({ message: 'Media deleted successfully', type: 'success' });
+    }
+    if (selectedItem?.id === id) {
+      setSelectedItem(null);
+    }
+  };
+
+  // Handle edit
+  const handleEdit = (id: string, name: string) => {
+    setMediaItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, name } : item
+      )
+    );
+    setToast({ message: 'Media name updated', type: 'success' });
+  };
+
+  // Handle show embed
+  const handleShowEmbed = (item: MediaItem) => {
+    setSelectedItem(item);
+  };
+
+  // Close toast
+  const closeToast = () => {
+    setToast(null);
+  };
+
+  return (
+    <div className="container mx-auto p-4 max-w-7xl">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">
+          Media Manager
+        </h1>
+        <button
+          onClick={() => router.push('/')}
+          className="bg-gray-600 dark:bg-gray-700 hover:bg-gray-700 dark:hover:bg-gray-600 text-gray-100 dark:text-gray-200 px-4 py-2 rounded-lg flex items-center transition-colors"
+        >
+          <ArrowLeft className="mr-2 w-4 h-4" />
+          Back to Homepage
+        </button>
+      </div>
+
+      {/* Upload Drop Zone */}
+      <UploadDropZone
+        onUpload={handleUpload}
+        onAddUrl={handleAddUrl}
+        uploading={uploading}
+        fileInputRef={fileInputRef}
+      />
+
+      {/* Toast Notifications */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={closeToast}
+        />
+      )}
+
+      {/* Media Grid */}
+      <div className="flex gap-6">
+        <div className="flex-1">
           {mediaItems.length === 0 ? (
-            <div className="text-center py-12 bg-gray-100 rounded-lg">
-              <p className="text-gray-500">No media items yet. Upload something to get started!</p>
+            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+              <p>No media items yet. Upload files or add URLs to get started.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {mediaItems.map((item) => (
-                <div key={item.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-                  <div className="h-48 bg-gray-200 relative">
-                    {item.type === 'image' || item.type === 'gif' ? (
-                      <img
-                        src={item.url}
-                        alt={item.name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : item.type === 'video' ? (
-                      <video
-                        src={item.url}
-                        className="w-full h-full object-cover"
-                        controls
-                        preload="metadata"
-                      />
-                    ) : null}
-                    
-                    <button
-                      onClick={() => removeItem(item.id)}
-                      className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors"
-                      title="Remove"
-                    >
-                      <FiX />
-                    </button>
-                  </div>
-                  
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center">
-                        {getFileIcon(item.type)}
-                        <span className="ml-2 text-sm text-gray-600 capitalize">{item.type}</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-gray-500">
-                          {new Date(item.timestamp).toLocaleDateString()}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          {formatFileSize(item.fileSize)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <h3 className="font-medium text-gray-900 truncate mb-3" title={item.name}>
-                      {item.name}
-                    </h3>
-                    
-                    {/* URL Copy Section */}
-                    <div className="mb-3">
-                      <p className="text-xs text-gray-500 mb-1">Direct URL:</p>
-                      <div className="flex items-center">
-                        <div className="flex-1 overflow-hidden bg-gray-100 rounded px-2 py-1">
-                          <p className="text-xs text-gray-600 truncate" title={item.url}>
-                            {item.url}
-                          </p>
-                        </div>
-                        
-                        <button
-                          onClick={() => copyToClipboard(item.url)}
-                          className="ml-2 text-blue-600 hover:text-blue-800 transition-colors"
-                          title="Copy URL"
-                        >
-                          {copied === item.url ? (
-                            <FiCheckCircle className="w-4 h-4 text-green-500" />
-                          ) : (
-                            <FiLink className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    
-                    {/* Embed Code Section */}
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Embed Code:</p>
-                      <div className="flex items-center">
-                        <div className="flex-1 overflow-hidden bg-gray-100 rounded px-2 py-1">
-                          <p className="text-xs text-gray-600 truncate" title={item.embedCode}>
-                            {item.embedCode}
-                          </p>
-                        </div>
-                        
-                        <button
-                          onClick={() => copyToClipboard(item.embedCode)}
-                          className="ml-2 text-blue-600 hover:text-blue-800 transition-colors"
-                          title="Copy Embed Code"
-                        >
-                          {copied === item.embedCode ? (
-                            <FiCheckCircle className="w-4 h-4 text-green-500" />
-                          ) : (
-                            <FiCode className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <MediaCard
+                  key={item.id}
+                  item={item}
+                  onDelete={handleDelete}
+                  onEdit={handleEdit}
+                  onShowEmbed={handleShowEmbed}
+                  editingItem={editingItem}
+                  setEditingItem={setEditingItem}
+                />
               ))}
             </div>
           )}
         </div>
-      </main>
+
+        {/* Embed Panel */}
+        {selectedItem && (
+          <div className="w-96">
+            <EmbedPanel
+              item={selectedItem}
+              onClose={() => setSelectedItem(null)}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
-}
+};
+
+export default MediaManager;

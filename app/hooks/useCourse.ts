@@ -8,7 +8,6 @@ import { uploadToCloudinary } from '@/utils/cloudinary';
 import { validateForm } from '@/utils/validation';
 import { createUserDocument } from '@/utils/userUtils';
 
-
 export const useCourse = (user: any, courseId: string | null) => {
   const router = useRouter();
   const isEditing = !!courseId;
@@ -161,9 +160,9 @@ export const useCourse = (user: any, courseId: string | null) => {
         setModal({ isOpen: true, status: 'success', message: 'Course updated successfully!' });
       } else {
         const docRef = await addDoc(collection(db, 'courses'), courseData);
-        await setDoc(doc(db, 'enrollments', user.uid, 'courses', docRef.id), {
-          enrolledAt: serverTimestamp(),
-        });
+        //await setDoc(doc(db, 'enrollments', user.uid, 'courses', docRef.id), {
+        //  enrolledAt: serverTimestamp(),
+       // });
         setModal({ isOpen: true, status: 'success', message: 'Course created successfully!' });
       }
     } catch (error: any) {

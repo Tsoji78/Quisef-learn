@@ -20,6 +20,7 @@ export interface Course {
   createdBy?: string;
   createdAt?: any;
   updatedAt?: any;
+  isDraft?: boolean;
 }
 
 export interface ModalState {

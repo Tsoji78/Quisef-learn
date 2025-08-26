@@ -5,6 +5,7 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, XAxis, YAxis, CartesianG
 import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, User } from 'firebase/auth';
+import { useRouter } from 'next/navigation';
 
 type Enrollment = { month: string; students: number };
 type CourseCompletion = { name: string; value: number };
@@ -16,6 +17,7 @@ type Activity = { action: string; user: string; time: string; icon: string };
 type Deadline = { task: string; date: string; color: string; urgent: boolean };
 
 export default function Dashboard() {
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [enrollmentData, setEnrollmentData] = useState<Enrollment[]>([]);
   const [courseCompletionData, setCourseCompletionData] = useState<CourseCompletion[]>([]);
@@ -25,9 +27,18 @@ export default function Dashboard() {
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [recentActivity, setRecentActivity] = useState<Activity[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
+  const [totalDrafts, setTotalDrafts] = useState<number>(0);
+  const [totalRevenue, setTotalRevenue] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28'];
+
+  // Navigation functions
+  const navigateToStudents = () => router.push('/students');
+  const navigateToCourses = () => router.push('/modules');
+  const navigateToCompletions = () => router.push('/completions');
+  const navigateToRevenue = () => router.push('/revenue');
+  const navigateToDrafts = () => router.push('/drafts');
 
   // Authentication check
   useEffect(() => {
@@ -68,7 +79,35 @@ export default function Dashboard() {
           ...doc.data(),
         })) as { id: string; title: string }[];
 
-        // Fetch Groups
+        // Fetch Course Drafts
+        const draftsSnapshot = await getDocs(collection(db, 'courseDrafts'));
+        setTotalDrafts(draftsSnapshot.size);
+
+        // Fetch Revenue
+        const revenueSnapshot = await getDocs(collection(db, 'revenue'));
+        const revenueRecords = revenueSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as { id: string; amount: number; date: any }[];
+        
+        const totalRevenueAmount = revenueRecords.reduce((sum, record) => sum + (record.amount || 0), 0);
+        setTotalRevenue(totalRevenueAmount);
+
+        // Fetch Users (Students)
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        const users = usersSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as { id: string; displayName: string; email: string; createdAt?: any }[];
+
+        // Fetch Course Completions
+        const completionsSnapshot = await getDocs(collection(db, 'completions'));
+        const completions = completionsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as { id: string; status: string; courseId: string; userId: string }[];
+
+        // Fetch Groups for additional data
         const groupsSnapshot = await getDocs(collection(db, 'groups'));
         const groups = groupsSnapshot.docs.map((doc) => ({
           id: doc.id,
@@ -82,24 +121,18 @@ export default function Dashboard() {
           createdAt?: any;
         }[];
 
-        // Fetch Users
-        const usersSnapshot = await getDocs(collection(db, 'users'));
-        const users = usersSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as { id: string; displayName: string; email: string }[];
-
-        // Derive Enrollment Data (based on group creation dates)
+        // Derive Enrollment Data (based on users collection)
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const enrollmentByMonth = groups.reduce((acc, group) => {
-          const createdAt = group.createdAt?.toDate?.();
-          if (!createdAt) return acc;
+        const enrollmentByMonth = users.reduce((acc, user) => {
+          // Assuming users have a createdAt field, otherwise use current date
+          const createdAt = user.createdAt?.toDate?.() || new Date();
           const month = months[createdAt.getMonth()];
           const year = createdAt.getFullYear();
           const key = `${month} ${year}`;
-          acc[key] = (acc[key] || 0) + (group.members?.length || 0);
+          acc[key] = (acc[key] || 0) + 1;
           return acc;
         }, {} as Record<string, number>);
+        
         const enrollmentData: Enrollment[] = Object.entries(enrollmentByMonth)
           .map(([month, students]) => ({ month, students }))
           .sort((a, b) => {
@@ -110,23 +143,27 @@ export default function Dashboard() {
           .slice(-5); // Last 5 months
         setEnrollmentData(enrollmentData);
 
-        // Derive Course Completion Data
+        // Derive Course Completion Data from completions collection
         const courseCompletion: CourseCompletion[] = [
           { name: 'Completed', value: 0 },
           { name: 'In Progress', value: 0 },
           { name: 'Not Started', value: 0 },
         ];
-        groups.forEach((group) => {
-          group.assignments?.forEach((assignment) => {
-            if (assignment.status === 'Completed') courseCompletion[0].value += 1;
-            else if (assignment.status === 'In Progress') courseCompletion[1].value += 1;
-            else courseCompletion[2].value += 1;
-          });
+        
+        completions.forEach((completion) => {
+          if (completion.status === 'Completed' || completion.status === 'completed') {
+            courseCompletion[0].value += 1;
+          } else if (completion.status === 'In Progress' || completion.status === 'in_progress') {
+            courseCompletion[1].value += 1;
+          } else {
+            courseCompletion[2].value += 1;
+          }
         });
-        const totalAssignments = courseCompletion.reduce((sum, c) => sum + c.value, 0);
-        if (totalAssignments > 0) {
+        
+        const totalCompletions = courseCompletion.reduce((sum, c) => sum + c.value, 0);
+        if (totalCompletions > 0) {
           courseCompletion.forEach((c) => {
-            c.value = Math.round((c.value / totalAssignments) * 100);
+            c.value = Math.round((c.value / totalCompletions) * 100);
           });
         }
         setCourseCompletionData(courseCompletion);
@@ -137,10 +174,14 @@ export default function Dashboard() {
             const courseGroups = groups.filter((g) => g.courseId === course.id);
             const totalMessages = await Promise.all(
               courseGroups.map(async (group) => {
-                const messagesSnapshot = await getDocs(
-                  collection(db, 'groups', group.id, 'chatForums', '1', 'messages')
-                );
-                return messagesSnapshot.size;
+                try {
+                  const messagesSnapshot = await getDocs(
+                    collection(db, 'groups', group.id, 'chatForums', '1', 'messages')
+                  );
+                  return messagesSnapshot.size;
+                } catch (error) {
+                  return 0;
+                }
               })
             );
             const engagementScore = totalMessages.reduce((sum, count) => sum + count, 0);
@@ -152,23 +193,38 @@ export default function Dashboard() {
         );
         setEngagementData(engagement);
 
-        // Derive Revenue Data (Placeholder: no direct revenue data)
-        const revenueData: Revenue[] = enrollmentData.map((enrollment) => ({
-          month: enrollment.month,
-          revenue: enrollment.students * 100, // Assume $100 per student
-        }));
+        // Derive Revenue Data from revenue collection
+        const revenueByMonth = revenueRecords.reduce((acc, record) => {
+          const date = record.date?.toDate?.() || new Date();
+          const month = months[date.getMonth()];
+          const year = date.getFullYear();
+          const key = `${month} ${year}`;
+          acc[key] = (acc[key] || 0) + (record.amount || 0);
+          return acc;
+        }, {} as Record<string, number>);
+
+        const revenueData: Revenue[] = Object.entries(revenueByMonth)
+          .map(([month, revenue]) => ({ month, revenue }))
+          .sort((a, b) => {
+            const [aMonth, aYear] = a.month.split(' ');
+            const [bMonth, bYear] = b.month.split(' ');
+            return new Date(`${aMonth} 1, ${aYear}`).getTime() - new Date(`${bMonth} 1, ${bYear}`).getTime();
+          })
+          .slice(-5); // Last 5 months
         setRevenueData(revenueData);
 
-        // Derive Notifications
-        const notifications: Notification[] = groups
-          .flatMap((group) =>
-            (group.assignments || []).map((assignment) => ({
-              message: `Assignment "${assignment.title}" in group "${group.name}" is ${assignment.status.toLowerCase()}`,
-              time: assignment.dueDate?.toDate?.().toLocaleString() || new Date().toLocaleString(),
-              type: assignment.status === 'Pending' ? 'warning' : assignment.status === 'Completed' ? 'success' : 'info',
-            }))
-          )
-          .slice(0, 4); // Limit to 4 notifications
+        // Derive Notifications from completions
+        const notifications: Notification[] = completions
+          .slice(0, 4)
+          .map((completion) => {
+            const course = courses.find(c => c.id === completion.courseId);
+            const user = users.find(u => u.id === completion.userId);
+            return {
+              message: `${user?.displayName || 'User'} ${completion.status.toLowerCase()} course "${course?.title || 'Unknown Course'}"`,
+              time: new Date().toLocaleString(),
+              type: completion.status === 'completed' ? 'success' : completion.status === 'in_progress' ? 'info' : 'warning',
+            };
+          });
         setNotifications(notifications);
 
         // Derive Instructors
@@ -178,12 +234,8 @@ export default function Dashboard() {
             const instructorGroups = groups.filter((g) => g.members?.some((m) => m.id === user.id && m.role === 'Instructor'));
             const courses = new Set(instructorGroups.map((g) => g.courseId)).size;
             const totalStudents = instructorGroups.reduce((sum, g) => sum + (g.members?.length || 0), 0);
-            const completedAssignments = instructorGroups.reduce(
-              (sum, g) => sum + (g.assignments?.filter((a) => a.status === 'Completed').length || 0),
-              0
-            );
-            const totalAssignments = instructorGroups.reduce((sum, g) => sum + (g.assignments?.length || 0), 0);
-            const completion = totalAssignments > 0 ? Math.round((completedAssignments / totalAssignments) * 100) : 0;
+            const userCompletions = completions.filter(c => c.userId === user.id && c.status === 'completed');
+            const completion = completions.length > 0 ? Math.round((userCompletions.length / completions.length) * 100) : 0;
             return {
               name: user.displayName || user.email || 'Unknown Instructor',
               courses,
@@ -195,29 +247,21 @@ export default function Dashboard() {
         setInstructors(instructors);
 
         // Derive Recent Activity
-        const recentActivity: Activity[] = await Promise.all(
-          groups.slice(0, 5).map(async (group) => {
-            const messagesSnapshot = await getDocs(
-              collection(db, 'groups', group.id, 'chatForums', '1', 'messages')
-            );
-            const latestMessage = messagesSnapshot.docs
-              .map((doc) => {
-                const data = doc.data() as { timestamp?: any; senderId?: string };
-                return { id: doc.id, ...data };
-              })
-              .sort((a, b) => (b.timestamp?.toDate?.().getTime() || 0) - (a.timestamp?.toDate?.().getTime() || 0))[0];
-            const sender = users.find((u) => u.id === latestMessage?.senderId);
+        const recentActivity: Activity[] = completions
+          .slice(0, 5)
+          .map((completion) => {
+            const course = courses.find(c => c.id === completion.courseId);
+            const user = users.find(u => u.id === completion.userId);
             return {
-              icon: '💬',
-              action: latestMessage ? `Sent a message in "${group.name}"` : `No recent messages in "${group.name}"`,
-              user: sender ? sender.displayName || sender.email : 'Unknown',
-              time: latestMessage?.timestamp?.toDate?.().toLocaleString() || new Date().toLocaleString(),
+              icon: completion.status === 'completed' ? '✅' : completion.status === 'in_progress' ? '📚' : '⏳',
+              action: `${completion.status === 'completed' ? 'Completed' : completion.status === 'in_progress' ? 'Started working on' : 'Enrolled in'} "${course?.title || 'Unknown Course'}"`,
+              user: user?.displayName || user?.email || 'Unknown User',
+              time: new Date().toLocaleString(),
             };
-          })
-        );
+          });
         setRecentActivity(recentActivity);
 
-        // Derive Deadlines
+        // Derive Deadlines from groups assignments
         const deadlines: Deadline[] = groups
           .flatMap((group) =>
             (group.assignments || []).map((assignment) => {
@@ -259,15 +303,19 @@ export default function Dashboard() {
   return (
     <div className="p-6 space-y-8 max-w-7xl mx-auto">
       {/* Header Section with Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-blue-500">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+        {/* Total Students Card */}
+        <div 
+          onClick={navigateToStudents}
+          className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-blue-500 cursor-pointer hover:scale-105"
+        >
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Total Students</h3>
               <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">
                 {enrollmentData.reduce((sum, e) => sum + e.students, 0)}
               </p>
-              <p className="text-sm text-green-500 font-medium mt-2">Calculated from groups</p>
+              <p className="text-sm text-green-500 font-medium mt-2">From users collection</p>
             </div>
             <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
               <svg className="w-6 h-6 text-blue-500 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -277,12 +325,16 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-green-500">
+        {/* Active Courses Card */}
+        <div 
+          onClick={navigateToCourses}
+          className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-green-500 cursor-pointer hover:scale-105"
+        >
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Active Courses</h3>
               <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">{engagementData.length}</p>
-              <p className="text-sm text-green-500 font-medium mt-2">Based on courses collection</p>
+              <p className="text-sm text-green-500 font-medium mt-2">From courses collection</p>
             </div>
             <div className="p-3 bg-green-100 dark:bg-green-900 rounded-full">
               <svg className="w-6 h-6 text-green-500 dark:text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -292,14 +344,37 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-purple-500">
+        {/* Course Drafts Card */}
+        <div 
+          onClick={navigateToDrafts}
+          className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-orange-500 cursor-pointer hover:scale-105"
+        >
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Course Drafts</h3>
+              <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">{totalDrafts}</p>
+              <p className="text-sm text-orange-500 font-medium mt-2">From courseDrafts collection</p>
+            </div>
+            <div className="p-3 bg-orange-100 dark:bg-orange-900 rounded-full">
+              <svg className="w-6 h-6 text-orange-500 dark:text-orange-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        {/* Completion Rate Card */}
+        <div 
+          onClick={navigateToCompletions}
+          className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-purple-500 cursor-pointer hover:scale-105"
+        >
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Completion Rate</h3>
               <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">
                 {courseCompletionData.find((c) => c.name === 'Completed')?.value || 0}%
               </p>
-              <p className="text-sm text-green-500 font-medium mt-2">Based on assignments</p>
+              <p className="text-sm text-purple-500 font-medium mt-2">From completions collection</p>
             </div>
             <div className="p-3 bg-purple-100 dark:bg-purple-900 rounded-full">
               <svg className="w-6 h-6 text-purple-500 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -309,14 +384,18 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-yellow-500">
+        {/* Total Revenue Card */}
+        <div 
+          onClick={navigateToRevenue}
+          className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-all duration-300 hover:shadow-lg border-l-4 border-yellow-500 cursor-pointer hover:scale-105"
+        >
           <div className="flex justify-between items-start">
             <div>
-              <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Monthly Revenue</h3>
+              <h3 className="text-lg font-medium text-gray-500 dark:text-gray-400">Total Revenue</h3>
               <p className="text-3xl font-bold text-gray-800 dark:text-white mt-2">
-                ${revenueData.reduce((sum, r) => sum + r.revenue, 0).toLocaleString()}
+                ${totalRevenue.toLocaleString()}
               </p>
-              <p className="text-sm text-green-500 font-medium mt-2">Estimated from enrollments</p>
+              <p className="text-sm text-yellow-500 font-medium mt-2">From revenue collection</p>
             </div>
             <div className="p-3 bg-yellow-100 dark:bg-yellow-900 rounded-full">
               <svg className="w-6 h-6 text-yellow-500 dark:text-yellow-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -551,14 +630,35 @@ export default function Dashboard() {
             </h2>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { name: 'Create Course', icon: '➕', color: 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' },
-                { name: 'Add Users', icon: '👤', color: 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' },
-                { name: 'Analytics', icon: '📊', color: 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300' },
-                { name: 'Settings', icon: '⚙️', color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300' },
+                { 
+                  name: 'Create Course', 
+                  icon: '➕', 
+                  color: 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300',
+                  onClick: () => router.push('/courses/create')
+                },
+                { 
+                  name: 'Add Users', 
+                  icon: '👤', 
+                  color: 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300',
+                  onClick: () => router.push('/users/add')
+                },
+                { 
+                  name: 'Analytics', 
+                  icon: '📊', 
+                  color: 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300',
+                  onClick: () => router.push('/analytics')
+                },
+                { 
+                  name: 'Settings', 
+                  icon: '⚙️', 
+                  color: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
+                  onClick: () => router.push('/settings')
+                },
               ].map((link, index) => (
                 <button
                   key={index}
-                  className={`p-3 rounded-lg ${link.color} font-medium flex flex-col items-center justify-center text-center h-24`}
+                  onClick={link.onClick}
+                  className={`p-3 rounded-lg ${link.color} font-medium flex flex-col items-center justify-center text-center h-24 hover:scale-105 transition-transform duration-200`}
                 >
                   <span className="text-2xl mb-2">{link.icon}</span>
                   {link.name}
@@ -573,7 +673,7 @@ export default function Dashboard() {
               Upcoming Deadlines
             </h2>
             <ul className="space-y-3">
-              {deadlines.map((item, index) => (
+              {deadlines.length > 0 ? deadlines.map((item, index) => (
                 <li key={index} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                   <div className="flex items-center">
                     {item.urgent && <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>}
@@ -581,7 +681,11 @@ export default function Dashboard() {
                   </div>
                   <span className={`text-sm font-medium ${item.color}`}>{item.date}</span>
                 </li>
-              ))}
+              )) : (
+                <li className="text-center text-gray-500 dark:text-gray-400 py-4">
+                  No upcoming deadlines
+                </li>
+              )}
             </ul>
           </div>
         </div>

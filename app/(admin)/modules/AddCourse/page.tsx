@@ -244,6 +244,8 @@ export default function CourseManagementPage() {
       courseActions={courseActions}
       draftEditorState={draftEditorState}
       draftEditorActions={draftEditorActions}
+      user={user} // Add this line
+      courseId={courseId}
     />
   );
 }
