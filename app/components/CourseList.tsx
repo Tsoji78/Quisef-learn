@@ -94,7 +94,7 @@ export default function CourseList({ courses, loading, error, deleteCourse }: Co
             />
             <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
           </div>
-          <Link href="/modules/addcourse">
+          <Link href="/modules/Addcourse">
             <button className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
               <Plus size={18} />
               <span>Add Course</span>
