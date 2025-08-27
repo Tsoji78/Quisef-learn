@@ -61,7 +61,7 @@ const LoginPage: React.FC = () => {
       await createUserDocument(userCredential.user);
       
       console.log('Successfully logged in with email');
-      router.push("/dashboard");
+      router.push("/home");
     } catch (error: any) {
       console.error('Email login error:', error);
       if (error.code === 'auth/user-not-found') {
@@ -108,7 +108,7 @@ const LoginPage: React.FC = () => {
       console.log('Profile image URL:', user.photoURL);
       
       // Redirect to dashboard
-      router.push("/dashboard");
+      router.push("/home");
     } catch (error: any) {
       console.error('Google login error:', error);
       if (error.code === 'auth/popup-closed-by-user') {
