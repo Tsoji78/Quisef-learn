@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { auth, googleProvider } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithPopup, updateProfile, sendEmailVerification } from "firebase/auth";
 
+export const dynamic = 'force-dynamic'
+
 export default function SignupPage() {
   const [formData, setFormData] = useState({
     fullName: "",

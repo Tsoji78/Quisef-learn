@@ -9,6 +9,9 @@ import { auth, googleProvider, db } from '@/lib/firebase';
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
 import { createUserDocument } from '@/utils/userUtils';
 
+export const dynamic = 'force-dynamic'
+
+
 interface CarouselImage {
   src: string;
   alt: string;
