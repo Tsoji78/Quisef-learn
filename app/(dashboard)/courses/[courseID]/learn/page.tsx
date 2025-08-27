@@ -61,6 +61,18 @@ export default function CourseDetailPage() {
   const [savingProgress, setSavingProgress] = useState(false);
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  // Safe content parsing function
+  const safeParseContent = (content: any) => {
+    if (!content) return 'No content available for this module.';
+    if (typeof content !== 'string') return String(content);
+    try {
+      return parse(content);
+    } catch (error) {
+      console.error('Error parsing content:', error);
+      return content; // Return raw string if parsing fails
+    }
+  };
+
   // Get friendly error message
   const getFriendlyErrorMessage = (error: any) => {
     switch (error.code) {
@@ -222,7 +234,13 @@ export default function CourseDetailPage() {
             progress: data.progress || 0,
             thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
             category: data.category || 'Uncategorized',
-            modules: Array.isArray(data.modules) ? data.modules : [],
+            modules: Array.isArray(data.modules) ? data.modules.map(module => ({
+              ...module,
+              id: module.id || `module-${Date.now()}-${Math.random()}`,
+              title: module.title || 'Untitled Module',
+              content: module.content || 'No content available for this module.',
+              duration: module.duration
+            })) : [],
           });
           setError(null);
         } else {
@@ -342,7 +360,7 @@ export default function CourseDetailPage() {
                         ref={(el) => { contentRefs.current[module.id] = el; }}
                         onScroll={() => handleScroll(module.id)}
                       >
-                        {parse(module.content)}
+                        {safeParseContent(module.content)}
                       </div>
                     )}
                   </div>
@@ -381,7 +399,7 @@ export default function CourseDetailPage() {
                   </div>
                 ))}
               </div>
-              <Link href="/groups">
+              <Link href="/group">
                 <button className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
                   Join Study Group
                 </button>

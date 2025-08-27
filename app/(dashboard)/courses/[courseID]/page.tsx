@@ -152,37 +152,45 @@ export default function CourseEnrollmentPage() {
     fetchCourse();
   }, [courseId]);
 
-  // Handle enrollment with relaxed group membership logic
+  // Handle enrollment - FIXED VERSION
   const handleEnrollment = async () => {
     if (!user || !course) {
       router.push('/login');
       return;
     }
     setEnrolling(true);
-    let groupId: string | null = course.groupId || null;
 
     try {
-      // Check or create group outside transaction
+      // Check if already enrolled
+      const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', course.id);
+      const enrollmentSnap = await getDoc(enrollmentRef);
+      if (enrollmentSnap.exists()) {
+        throw new Error('You are already enrolled in this course.');
+      }
+
+      // Find or create group
+      let groupId = course.groupId;
       if (!groupId) {
         const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', course.id));
         const groupsSnapshot = await getDocs(groupsQuery);
+        
         if (!groupsSnapshot.empty) {
           groupId = groupsSnapshot.docs[0].id;
         } else {
           // Create new group
           const groupRef = doc(collection(db, 'groups'));
-          const newGroup = {
+          await setDoc(groupRef, {
             name: `${course.title} Study Group`,
             description: `Study group for ${course.title}`,
             courseId: course.id,
             members: [],
+            memberIds: [],
             assignments: [],
             createdAt: Timestamp.fromDate(new Date()),
-          };
-          await setDoc(groupRef, newGroup);
+          });
           groupId = groupRef.id;
 
-          // Create default chat forum
+          // Create default forum
           await setDoc(doc(db, 'groups', groupId, 'chatForums', 'default'), {
             id: 'default',
             title: 'General Discussion',
@@ -193,77 +201,74 @@ export default function CourseEnrollmentPage() {
         }
       }
 
-      await runTransaction(db, async (transaction) => {
-        // Check if already enrolled
-        const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', course.id);
-        const enrollmentSnap = await transaction.get(enrollmentRef);
-        if (enrollmentSnap.exists()) {
-          throw new Error('You are already enrolled in this course.');
-        }
+      // Create enrollment
+      await setDoc(enrollmentRef, {
+        courseId: course.id,
+        userId: user.uid,
+        enrolledAt: new Date(),
+        status: 'active',
+      });
 
-        // Create enrollment
-        const enrollmentData: Enrollment = {
-          courseId: course.id,
-          userId: user.uid,
-          enrolledAt: new Date(),
-          status: 'active',
-        };
-        transaction.set(enrollmentRef, enrollmentData);
+      // Initialize progress
+      const progressRef = doc(db, 'users', user.uid, 'courseProgress', course.id);
+      await setDoc(progressRef, {
+        readModules: {},
+        scrollPositions: {},
+        lastReadDate: new Date(),
+        courseId: course.id,
+        userId: user.uid,
+        progress: 0,
+      });
 
-        // Initialize progress
-        const progressRef = doc(db, 'users', user.uid, 'courseProgress', course.id);
-        transaction.set(progressRef, {
-          readModules: {},
-          scrollPositions: {},
-          lastReadDate: new Date(),
-          courseId: course.id,
-          userId: user.uid,
-          progress: 0,
-        });
-
-        // Update course total students and groupId
-        const courseRef = doc(db, 'courses', course.id);
-        transaction.update(courseRef, {
-          totalStudents: increment(1),
-          groupId: groupId,
-        });
-
-        // Add user to group
-        const groupRef = doc(db, 'groups', groupId!);
-        const groupSnap = await transaction.get(groupRef);
-        if (!groupSnap.exists()) {
-          throw new Error('Group not found.');
-        }
-        const groupData = groupSnap.data();
-        const newMember: Member = {
-          id: user.uid,
-          name: user.displayName || 'Anonymous User',
-          email: user.email || '',
-          role: 'Student',
-          profileImage: user.photoURL || '',
-        };
-        const isMember = groupData.members.some((m: Member) => m.id === user.uid);
+      // Add user to group
+      const groupRef = doc(db, 'groups', groupId);
+      const groupDoc = await getDoc(groupRef);
+      
+      if (groupDoc.exists()) {
+        const groupData = groupDoc.data();
+        const currentMembers = groupData.members || [];
+        const currentMemberIds = groupData.memberIds || [];
+        
+        const isMember = currentMembers.some((m: Member) => m.id === user.uid);
         if (!isMember) {
-          transaction.update(groupRef, {
-            members: arrayUnion(newMember),
+          const newMember: Member = {
+            id: user.uid,
+            name: user.displayName || 'Anonymous User',
+            email: user.email || '',
+            role: 'Student',
+            profileImage: user.photoURL || '',
+          };
+          
+          await updateDoc(groupRef, {
+            members: [...currentMembers, newMember],
+            memberIds: [...currentMemberIds, user.uid],
           });
 
           // Add welcome message
-          const welcomeMessageRef = doc(collection(db, 'groups', groupId!, 'chatForums', 'default', 'messages'));
-          transaction.set(welcomeMessageRef, {
+          await addDoc(collection(db, 'groups', groupId, 'chatForums', 'default', 'messages'), {
             senderId: 'system',
             senderName: 'System',
             content: `Welcome ${user.displayName || 'new member'} to the ${course.title} study group!`,
             timestamp: serverTimestamp(),
           });
         }
+      }
+
+      // Update course stats
+      const courseRef = doc(db, 'courses', course.id);
+      await updateDoc(courseRef, {
+        totalStudents: increment(1),
+        groupId: groupId,
       });
 
       setIsEnrolled(true);
       setEnrollmentSuccess(true);
       setError(null);
-      toast.success('Enrolled successfully and added to course group!');
-      router.push(`/groups?groupId=${groupId}`);
+      toast.success('Enrolled successfully! Welcome to the course!');
+      
+      // REMOVED: router.push(`/groups?groupId=${groupId}`);
+      // The modal will handle navigation now
+      
     } catch (err: any) {
       console.error('Enrollment error:', err);
       setError(`Failed to enroll: ${err.message || 'Unknown error'}`);
@@ -543,6 +548,7 @@ export default function CourseEnrollmentPage() {
         </div>
       </div>
 
+      {/* UPDATED ENROLLMENT MODAL */}
       {showEnrollmentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
@@ -550,8 +556,17 @@ export default function CourseEnrollmentPage() {
               <>
                 <h3 className="text-xl font-semibold mb-4 text-green-600">Enrollment Successful!</h3>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
-                  You have successfully enrolled in <strong>{course.title}</strong>. You can now start learning and join the study group!
+                  You have successfully enrolled in <strong>{course.title}</strong>. You can now start learning and access all course materials!
                 </p>
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6">
+                  <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">What's next?</h4>
+                  <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                    <li>• Access all course modules and materials</li>
+                    <li>• Track your progress as you learn</li>
+                    <li>• Join the course study group anytime</li>
+                    <li>• Earn your completion certificate</li>
+                  </ul>
+                </div>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowEnrollmentModal(false)}
@@ -559,11 +574,15 @@ export default function CourseEnrollmentPage() {
                   >
                     Close
                   </button>
-                  <Link href={`/courses/${course.id}/learn`} className="flex-1">
-                    <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
-                      Continue to Course
-                    </button>
-                  </Link>
+                  <button
+                    onClick={() => {
+                      setShowEnrollmentModal(false);
+                      router.push(`/courses/${course.id}/learn`);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Start Learning
+                  </button>
                 </div>
               </>
             ) : (
