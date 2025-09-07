@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -27,32 +27,37 @@ export default function CoursesPage() {
   const [user, setUser] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const coursesPerPage = 6;
+  const enrollmentCache = useRef<Record<string, boolean>>({});
 
-  // Authentication check - optional for viewing courses
+  // Authentication check
   useEffect(() => {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      console.log('Auth state changed, user:', currentUser?.uid);
       setUser(currentUser);
-      if (currentUser && courses.length > 0) {
-        checkEnrollmentStatus(currentUser.uid, courses);
+      if (currentUser) {
+        checkEnrollmentStatus(currentUser.uid);
+      } else {
+        setEnrollmentStatus({});
+        enrollmentCache.current = {};
       }
     });
     return () => unsubscribe();
-  }, [courses]);
+  }, []);
 
-  // Fetch courses from Firestore - no authentication required
+  // Fetch courses from Firestore
   useEffect(() => {
     const fetchCourses = async () => {
       setLoading(true);
       try {
+        console.log('Fetching courses from Firestore');
         const coursesCollection = collection(db, 'courses');
         const coursesSnapshot = await getDocs(coursesCollection);
         const coursesList: Course[] = await Promise.all(
           coursesSnapshot.docs.map(async (doc) => {
             const data = doc.data();
             let groupId: string | undefined = undefined;
-            
-            // Check for associated study groups
+
             try {
               const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', doc.id));
               const groupsSnapshot = await getDocs(groupsQuery);
@@ -60,9 +65,9 @@ export default function CoursesPage() {
                 groupId = groupsSnapshot.docs[0].id;
               }
             } catch (groupError) {
-              console.warn('Error fetching group info for course:', doc.id);
+              console.warn('Error fetching group info for course:', doc.id, groupError);
             }
-            
+
             return {
               id: doc.id,
               title: data.title || 'Untitled Course',
@@ -78,11 +83,12 @@ export default function CoursesPage() {
             };
           })
         );
+        console.log('Fetched courses:', coursesList.length);
         setCourses(coursesList);
         setError(null);
-        
+
         if (user) {
-          checkEnrollmentStatus(user.uid, coursesList);
+          checkEnrollmentStatus(user.uid);
         }
       } catch (err: any) {
         console.error('Error fetching courses:', err);
@@ -91,24 +97,36 @@ export default function CoursesPage() {
         setLoading(false);
       }
     };
-    
+
     fetchCourses();
   }, [user]);
 
-  // Check enrollment status for all courses - only for authenticated users
-  const checkEnrollmentStatus = async (userId: string, courses: Course[]) => {
+  // Check enrollment status with batch query
+  const checkEnrollmentStatus = async (userId: string) => {
+    if (!userId) return;
     try {
+      console.log('Checking enrollment status for user:', userId);
+      const enrollmentsQuery = query(collection(db, 'users', userId, 'enrollments'));
+      const enrollmentsSnapshot = await getDocs(enrollmentsQuery);
       const status: Record<string, boolean> = {};
-      for (const course of courses) {
-        const enrollmentRef = doc(db, 'users', userId, 'enrollments', course.id);
-        const enrollmentSnap = await getDoc(enrollmentRef);
-        status[course.id] = enrollmentSnap.exists();
-      }
+      enrollmentsSnapshot.forEach((doc) => {
+        status[doc.id] = true;
+      });
+      enrollmentCache.current = status;
       setEnrollmentStatus(status);
+      console.log('Enrollment status:', status);
     } catch (err) {
       console.error('Error checking enrollment status:', err);
     }
   };
+
+  // Refresh enrollment status on navigation or enrollment
+  useEffect(() => {
+    if (user && window.location.search.includes('enrolled=true')) {
+      console.log('Detected recent enrollment, refreshing status');
+      checkEnrollmentStatus(user.uid);
+    }
+  }, [user]);
 
   // Filter and paginate courses
   const filteredCourses = filter === 'All' ? courses : courses.filter((course) => course.category === filter);
@@ -169,11 +187,13 @@ export default function CoursesPage() {
           ))}
         </div>
       </div>
-      
+
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
+        </div>
       )}
-      
+
       {!user && (
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-4 py-3 rounded mb-6">
           <p className="text-sm">
@@ -188,7 +208,7 @@ export default function CoursesPage() {
           </p>
         </div>
       )}
-      
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {currentCourses.map((course) => (
           <div key={course.id} className="group">
@@ -209,7 +229,7 @@ export default function CoursesPage() {
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.instructor}</span>
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.duration}</span>
                 </div>
-                
+
                 {course.groupId && (
                   <div className="mt-2">
                     <Link href={`/groups?groupId=${course.groupId}`} className="text-blue-600 hover:underline text-sm">
@@ -217,7 +237,7 @@ export default function CoursesPage() {
                     </Link>
                   </div>
                 )}
-                
+
                 <div className="mt-4">
                   {user ? (
                     enrollmentStatus[course.id] ? (
@@ -265,13 +285,13 @@ export default function CoursesPage() {
           </div>
         ))}
       </div>
-      
+
       {!loading && currentCourses.length === 0 && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <p className="text-xl">No courses found in this category.</p>
         </div>
       )}
-      
+
       {filteredCourses.length > 0 && (
         <div className="flex justify-center items-center mt-8 space-x-2">
           <button

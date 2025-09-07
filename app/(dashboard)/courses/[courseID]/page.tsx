@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, addDoc, arrayUnion, increment, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -73,14 +73,17 @@ export default function CourseEnrollmentPage() {
   const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
+  const [lastModuleId, setLastModuleId] = useState<string | null>(null);
+  const enrollmentChecked = useRef(false);
 
   // Handle authentication state
   useEffect(() => {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      console.log('Auth state changed, user:', currentUser?.uid);
       setUser(currentUser);
       setAuthLoading(false);
-      if (currentUser && courseId) {
+      if (currentUser && courseId && !enrollmentChecked.current) {
         checkEnrollmentStatus(currentUser.uid, courseId);
       }
     });
@@ -89,10 +92,26 @@ export default function CourseEnrollmentPage() {
 
   // Check enrollment status
   const checkEnrollmentStatus = async (userId: string, courseId: string) => {
+    if (!userId || !courseId) return;
     try {
+      console.log('Checking enrollment status for user:', userId, 'course:', courseId);
       const enrollmentRef = doc(db, 'users', userId, 'enrollments', courseId);
       const enrollmentSnap = await getDoc(enrollmentRef);
       setIsEnrolled(enrollmentSnap.exists());
+      enrollmentChecked.current = true;
+      console.log('Enrollment status for course', courseId, ':', enrollmentSnap.exists());
+
+      // Fetch last module for resume link
+      if (enrollmentSnap.exists()) {
+        const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
+        const progressSnap = await getDoc(progressRef);
+        if (progressSnap.exists()) {
+          const progressData = progressSnap.data();
+          const readModules = progressData.readModules || {};
+          const lastModule = Object.keys(readModules).sort().pop();
+          setLastModuleId(lastModule || null);
+        }
+      }
     } catch (err) {
       console.error('Error checking enrollment:', err);
       setError('Failed to check enrollment status');
@@ -101,14 +120,16 @@ export default function CourseEnrollmentPage() {
 
   // Fetch course details
   useEffect(() => {
+    if (!courseId || typeof courseId !== 'string' || courseId.trim() === '') {
+      console.error('Invalid or missing course ID:', params);
+      setError('Invalid or missing course ID in the URL');
+      setLoading(false);
+      return;
+    }
     const fetchCourse = async () => {
-      if (!courseId) {
-        setError('No course ID provided');
-        setLoading(false);
-        return;
-      }
       setLoading(true);
       try {
+        console.log('Fetching course with ID:', courseId);
         const docRef = doc(db, 'courses', courseId);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
@@ -140,7 +161,8 @@ export default function CourseEnrollmentPage() {
           });
           setError(null);
         } else {
-          setError('Course not found');
+          console.error('Course not found for ID:', courseId);
+          setError(`Course with ID ${courseId} not found`);
         }
       } catch (err: any) {
         console.error('Error fetching course:', err);
@@ -152,37 +174,48 @@ export default function CourseEnrollmentPage() {
     fetchCourse();
   }, [courseId]);
 
-  // Handle enrollment - FIXED VERSION
+  // Handle enrollment
   const handleEnrollment = async () => {
-    if (!user || !course) {
+    if (!user) {
+      console.log('No user logged in, redirecting to login');
       router.push('/login');
+      return;
+    }
+    if (!course || !courseId || typeof courseId !== 'string' || courseId.trim() === '') {
+      console.error('Invalid course data or ID:', { course, courseId });
+      setError('Invalid course data or ID');
+      toast.error('Invalid course ID');
       return;
     }
     setEnrolling(true);
 
     try {
-      // Check if already enrolled
-      const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', course.id);
+      console.log('Enrolling user:', user.uid, 'in course:', courseId);
+      const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', courseId);
       const enrollmentSnap = await getDoc(enrollmentRef);
       if (enrollmentSnap.exists()) {
+        console.log('User already enrolled:', user.uid);
+        setIsEnrolled(true);
+        enrollmentChecked.current = true;
         throw new Error('You are already enrolled in this course.');
       }
 
-      // Find or create group
       let groupId = course.groupId;
       if (!groupId) {
-        const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', course.id));
+        console.log('Checking for existing group for course:', courseId);
+        const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', courseId));
         const groupsSnapshot = await getDocs(groupsQuery);
-        
+
         if (!groupsSnapshot.empty) {
           groupId = groupsSnapshot.docs[0].id;
+          console.log('Found existing group:', groupId);
         } else {
-          // Create new group
+          console.log('Creating new group for course:', courseId);
           const groupRef = doc(collection(db, 'groups'));
           await setDoc(groupRef, {
             name: `${course.title} Study Group`,
             description: `Study group for ${course.title}`,
-            courseId: course.id,
+            courseId: courseId,
             members: [],
             memberIds: [],
             assignments: [],
@@ -190,7 +223,6 @@ export default function CourseEnrollmentPage() {
           });
           groupId = groupRef.id;
 
-          // Create default forum
           await setDoc(doc(db, 'groups', groupId, 'chatForums', 'default'), {
             id: 'default',
             title: 'General Discussion',
@@ -198,77 +230,72 @@ export default function CourseEnrollmentPage() {
             memberCount: 0,
             lastMessageAt: Timestamp.fromDate(new Date()),
           });
+          console.log('Created new group:', groupId);
         }
       }
 
-      // Create enrollment
-      await setDoc(enrollmentRef, {
-        courseId: course.id,
-        userId: user.uid,
-        enrolledAt: new Date(),
-        status: 'active',
-      });
+      await runTransaction(db, async (transaction) => {
+        transaction.set(enrollmentRef, {
+          courseId: courseId,
+          userId: user.uid,
+          enrolledAt: new Date(),
+          status: 'active',
+        });
 
-      // Initialize progress
-      const progressRef = doc(db, 'users', user.uid, 'courseProgress', course.id);
-      await setDoc(progressRef, {
-        readModules: {},
-        scrollPositions: {},
-        lastReadDate: new Date(),
-        courseId: course.id,
-        userId: user.uid,
-        progress: 0,
-      });
+        const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
+        transaction.set(progressRef, {
+          readModules: {},
+          scrollPositions: {},
+          lastReadDate: new Date(),
+          courseId: courseId,
+          userId: user.uid,
+          progress: 0,
+        });
 
-      // Add user to group
-      const groupRef = doc(db, 'groups', groupId);
-      const groupDoc = await getDoc(groupRef);
-      
-      if (groupDoc.exists()) {
-        const groupData = groupDoc.data();
-        const currentMembers = groupData.members || [];
-        const currentMemberIds = groupData.memberIds || [];
-        
-        const isMember = currentMembers.some((m: Member) => m.id === user.uid);
-        if (!isMember) {
-          const newMember: Member = {
-            id: user.uid,
-            name: user.displayName || 'Anonymous User',
-            email: user.email || '',
-            role: 'Student',
-            profileImage: user.photoURL || '',
-          };
-          
-          await updateDoc(groupRef, {
-            members: [...currentMembers, newMember],
-            memberIds: [...currentMemberIds, user.uid],
-          });
+        const groupRef = doc(db, 'groups', groupId!);
+        const groupDoc = await getDoc(groupRef);
+        if (groupDoc.exists()) {
+          const groupData = groupDoc.data();
+          const currentMembers = groupData.members || [];
+          const currentMemberIds = groupData.memberIds || [];
 
-          // Add welcome message
-          await addDoc(collection(db, 'groups', groupId, 'chatForums', 'default', 'messages'), {
-            senderId: 'system',
-            senderName: 'System',
-            content: `Welcome ${user.displayName || 'new member'} to the ${course.title} study group!`,
-            timestamp: serverTimestamp(),
-          });
+          if (!currentMemberIds.includes(user.uid)) {
+            transaction.update(groupRef, {
+              members: arrayUnion({
+                id: user.uid,
+                name: user.displayName || 'Anonymous User',
+                email: user.email || '',
+                role: 'Student',
+                profileImage: user.photoURL || '',
+              }),
+              memberIds: arrayUnion(user.uid),
+            });
+          }
+        } else {
+          throw new Error(`Group not found for ID: ${groupId}`);
         }
-      }
 
-      // Update course stats
-      const courseRef = doc(db, 'courses', course.id);
-      await updateDoc(courseRef, {
-        totalStudents: increment(1),
-        groupId: groupId,
+        const courseRef = doc(db, 'courses', courseId);
+        transaction.update(courseRef, {
+          totalStudents: increment(1),
+          groupId: groupId,
+        });
       });
 
+      await addDoc(collection(db, 'groups', groupId!, 'chatForums', 'default', 'messages'), {
+        senderId: 'system',
+        senderName: 'System',
+        content: `Welcome ${user.displayName || 'new member'} to the ${course.title} study group!`,
+        timestamp: serverTimestamp(),
+      });
+
+      console.log('Enrollment successful for user:', user.uid);
       setIsEnrolled(true);
+      enrollmentChecked.current = true;
       setEnrollmentSuccess(true);
       setError(null);
       toast.success('Enrolled successfully! Welcome to the course!');
-      
-      // REMOVED: router.push(`/groups?groupId=${groupId}`);
-      // The modal will handle navigation now
-      
+      router.push(`/courses/${courseId}/learn?enrolled=true`);
     } catch (err: any) {
       console.error('Enrollment error:', err);
       setError(`Failed to enroll: ${err.message || 'Unknown error'}`);
@@ -494,7 +521,7 @@ export default function CourseEnrollmentPage() {
                 )}
               </div>
               {isEnrolled ? (
-                <Link href={`/courses/${course.id}/learn`}>
+                <Link href={`/courses/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
                   <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4">
                     Resume Course
                   </button>
@@ -509,7 +536,9 @@ export default function CourseEnrollmentPage() {
                 </button>
               )}
               {error && (
-                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">{error}</div>
+                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
+                  {error.includes('Invalid') || error.includes('not found') ? error : `Enrollment failed: ${error}`}
+                </div>
               )}
               <p className="text-center text-sm text-gray-500 dark:text-gray-400 mb-6">30-day money-back guarantee</p>
               <div className="space-y-4">
@@ -548,7 +577,6 @@ export default function CourseEnrollmentPage() {
         </div>
       </div>
 
-      {/* UPDATED ENROLLMENT MODAL */}
       {showEnrollmentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
@@ -574,15 +602,11 @@ export default function CourseEnrollmentPage() {
                   >
                     Close
                   </button>
-                  <button
-                    onClick={() => {
-                      setShowEnrollmentModal(false);
-                      router.push(`/courses/${course.id}/learn`);
-                    }}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors"
-                  >
-                    Start Learning
-                  </button>
+                  <Link href={`/courses/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
+                    <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
+                      Start Learning
+                    </button>
+                  </Link>
                 </div>
               </>
             ) : (
@@ -593,7 +617,9 @@ export default function CourseEnrollmentPage() {
                   {course.price > 0 && ` This will charge $${course.price} to your account.`}
                 </p>
                 {error && (
-                  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>
+                  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                    {error}
+                  </div>
                 )}
                 <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6">
                   <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">What happens next?</h4>
