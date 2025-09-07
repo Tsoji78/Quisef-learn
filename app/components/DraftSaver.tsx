@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Save, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -32,8 +32,6 @@ export const DraftSaver: React.FC<DraftSaverProps> = ({
     status: 'idle',
     message: '',
   });
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
-  const [autoSaveInterval, setAutoSaveInterval] = useState(30000); // 30 seconds
 
   // Generate draft ID based on courseId or create new one
   const getDraftId = useCallback(() => {
@@ -76,7 +74,6 @@ export const DraftSaver: React.FC<DraftSaverProps> = ({
           savedAt: new Date().toISOString(),
           userId: user.uid,
           originalCourseId: courseId,
-          autoSaved: true,
         },
       };
 
@@ -117,29 +114,6 @@ export const DraftSaver: React.FC<DraftSaverProps> = ({
       }, 5000);
     }
   }, [formData, user, courseId, draftEditorActions, getDraftId]);
-
-  // Manual save draft
-  const handleManualSave = useCallback(() => {
-    saveDraft();
-  }, [saveDraft]);
-
-  // Auto-save functionality
-  useEffect(() => {
-    if (!autoSaveEnabled || !user) return;
-
-    const intervalId = setInterval(() => {
-      // Only auto-save if there's actual content
-      const hasContent = formData.title || 
-        formData.instructor || 
-        (formData.modules && formData.modules.length > 0);
-
-      if (hasContent) {
-        saveDraft();
-      }
-    }, autoSaveInterval);
-
-    return () => clearInterval(intervalId);
-  }, [autoSaveEnabled, autoSaveInterval, saveDraft, formData, user]);
 
   // Load existing draft
   const loadDraft = useCallback(async () => {
@@ -212,7 +186,7 @@ export const DraftSaver: React.FC<DraftSaverProps> = ({
       <div className="flex items-center gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
         {/* Manual Save Button */}
         <button
-          onClick={handleManualSave}
+          onClick={saveDraft}
           disabled={draftStatus.status === 'saving'}
           className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium transition-colors ${getStatusClasses()}`}
           title="Save as draft"
@@ -234,32 +208,6 @@ export const DraftSaver: React.FC<DraftSaverProps> = ({
             Last saved: {formatLastSaved(draftStatus.lastSaved)}
           </span>
         )}
-
-        {/* Auto-save Toggle */}
-        <div className="flex items-center gap-2 ml-auto">
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={autoSaveEnabled}
-              onChange={(e) => setAutoSaveEnabled(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            Auto-save
-          </label>
-          
-          {autoSaveEnabled && (
-            <select
-              value={autoSaveInterval}
-              onChange={(e) => setAutoSaveInterval(Number(e.target.value))}
-              className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-400"
-            >
-              <option value={15000}>15s</option>
-              <option value={30000}>30s</option>
-              <option value={60000}>1m</option>
-              <option value={300000}>5m</option>
-            </select>
-          )}
-        </div>
       </div>
 
       {/* Draft Info Banner */}
@@ -268,7 +216,7 @@ export const DraftSaver: React.FC<DraftSaverProps> = ({
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
             <span className="text-sm text-yellow-800 dark:text-yellow-200">
-              This is a draft version. Changes will be auto-saved but not published until you save the course.
+              This is a draft version. Changes will be saved manually when you click "Save Draft".
             </span>
           </div>
         </div>

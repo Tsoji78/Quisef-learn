@@ -1,87 +1,87 @@
-"use client"
-import React, { useState, useRef } from 'react';
-import { Download, Award, Calendar, User, BookOpen, Star, Sun, Moon, Sparkles, GraduationCap } from 'lucide-react';
+'use client';
 
-const CertificateGenerator = () => {
-  const [formData, setFormData] = useState({
-    studentName: '',
-    courseName: '',
-    completionDate: ''
-  });
-  
-  const [showCertificate, setShowCertificate] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const certificateRef = useRef(null);
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { db } from '@/lib/firebase';
+import { Award, Download, Calendar, BookOpen, Star, User, ArrowLeft, Search, Filter } from 'lucide-react';
+import Link from 'next/link';
+import { toast } from 'react-hot-toast';
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
+interface Certificate {
+  id: string;
+  userId: string;
+  courseId: string;
+  courseName: string;
+  studentName: string;
+  completionDate: Date;
+  issuedDate: Date;
+  certificateUrl?: string;
+}
 
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-  };
+export default function CertificatesPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'course'>('newest');
+  const [filterBy, setFilterBy] = useState<'all' | 'thisYear' | 'lastYear'>('all');
 
-  const generateCertificate = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (Object.values(formData).every(field => field.trim() !== '')) {
-      setShowCertificate(true);
+  // Download certificate function - Fixed with proper error handling
+  const downloadCertificate = (cert: Certificate) => {
+    if (!cert) {
+      toast.error('Certificate data not available');
+      return;
     }
-  };
 
-  const downloadCertificate = () => {
-    const certificate = certificateRef.current;
-    if (certificate) {
-      // Create a canvas to render the certificate
+    try {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // Set canvas size (16:9 ratio for better printing)
+      if (!ctx) {
+        toast.error('Unable to generate certificate: Canvas not supported');
+        return;
+      }
+
       canvas.width = 1600;
       canvas.height = 900;
       
-      if (!ctx) {
-        alert('Unable to generate certificate: Canvas context not available.');
-        return;
-      }
-      
-      // Gradient background
+      // Background gradient
       const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
       gradient.addColorStop(0, '#f8fafc');
       gradient.addColorStop(1, '#e2e8f0');
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Add decorative border
+      // Outer border
       ctx.strokeStyle = '#d4af37';
       ctx.lineWidth = 12;
       ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
       
-      // Inner elegant border
+      // Inner border
       ctx.strokeStyle = '#1e40af';
       ctx.lineWidth = 4;
       ctx.strokeRect(90, 90, canvas.width - 180, canvas.height - 180);
       
-      // Add corner decorations
+      // Corner decorations
       const cornerSize = 80;
       ctx.fillStyle = '#d4af37';
-      // Top left corner
+      // Top left
       ctx.fillRect(90, 90, cornerSize, 8);
       ctx.fillRect(90, 90, 8, cornerSize);
-      // Top right corner
+      // Top right
       ctx.fillRect(canvas.width - 170, 90, cornerSize, 8);
       ctx.fillRect(canvas.width - 98, 90, 8, cornerSize);
-      // Bottom left corner
+      // Bottom left
       ctx.fillRect(90, canvas.height - 98, cornerSize, 8);
       ctx.fillRect(90, canvas.height - 170, 8, cornerSize);
-      // Bottom right corner
+      // Bottom right
       ctx.fillRect(canvas.width - 170, canvas.height - 98, cornerSize, 8);
       ctx.fillRect(canvas.width - 98, canvas.height - 170, 8, cornerSize);
       
-      // Set text properties
       ctx.textAlign = 'center';
       
       // Title
@@ -89,7 +89,7 @@ const CertificateGenerator = () => {
       ctx.font = 'bold 64px serif';
       ctx.fillText('CERTIFICATE OF COMPLETION', canvas.width / 2, 200);
       
-      // Decorative line under title
+      // Decorative line
       ctx.strokeStyle = '#d4af37';
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -97,21 +97,22 @@ const CertificateGenerator = () => {
       ctx.lineTo(canvas.width / 2 + 300, 230);
       ctx.stroke();
       
-      // Subtitle
+      // Certificate text
       ctx.font = '28px serif';
       ctx.fillStyle = '#64748b';
       ctx.fillText('This is to certify that', canvas.width / 2, 300);
       
-      // Student name with elegant styling
+      // Student name
       ctx.font = 'bold 56px serif';
       ctx.fillStyle = '#d4af37';
-      ctx.fillText(formData.studentName.toUpperCase(), canvas.width / 2, 380);
+      const studentName = cert.studentName || 'Student';
+      ctx.fillText(studentName.toUpperCase(), canvas.width / 2, 380);
       
       // Underline for student name
       ctx.strokeStyle = '#d4af37';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      const nameWidth = ctx.measureText(formData.studentName.toUpperCase()).width;
+      const nameWidth = ctx.measureText(studentName.toUpperCase()).width;
       ctx.moveTo(canvas.width / 2 - nameWidth / 2 - 20, 400);
       ctx.lineTo(canvas.width / 2 + nameWidth / 2 + 20, 400);
       ctx.stroke();
@@ -124,12 +125,13 @@ const CertificateGenerator = () => {
       // Course name
       ctx.font = 'bold 42px serif';
       ctx.fillStyle = '#1e40af';
-      ctx.fillText(formData.courseName, canvas.width / 2, 530);
+      const courseName = cert.courseName || 'Course';
+      ctx.fillText(courseName, canvas.width / 2, 530);
       
       // Completion date
       ctx.fillStyle = '#64748b';
       ctx.font = '24px serif';
-      ctx.fillText(`Completed on ${new Date(formData.completionDate).toLocaleDateString('en-US', { 
+      ctx.fillText(`Completed on ${cert.completionDate.toLocaleDateString('en-US', { 
         year: 'numeric', 
         month: 'long', 
         day: 'numeric' 
@@ -143,317 +145,466 @@ const CertificateGenerator = () => {
       // Issue date
       ctx.fillStyle = '#64748b';
       ctx.font = '20px serif';
-      ctx.fillText(`Issued on ${new Date().toLocaleDateString('en-US', { 
+      ctx.fillText(`Issued on ${cert.issuedDate.toLocaleDateString('en-US', { 
         year: 'numeric', 
         month: 'long', 
         day: 'numeric' 
       })}`, canvas.width / 2, 760);
       
-      // Download the certificate
+      // Download
       const link = document.createElement('a');
-      link.download = `${formData.studentName.replace(/\s+/g, '_')}_Certificate.png`;
+      link.download = `${studentName.replace(/\s+/g, '_')}_${courseName.replace(/\s+/g, '_')}_Certificate.png`;
       link.href = canvas.toDataURL('image/png', 1.0);
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Certificate downloaded successfully!');
+    } catch (error) {
+      console.error('Error generating certificate:', error);
+      toast.error('Failed to generate certificate');
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      studentName: '',
-      courseName: '',
-      completionDate: ''
+  // Authentication check
+  useEffect(() => {
+    setAuthLoading(true);
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        loadUserCertificates(currentUser.uid);
+      } else {
+        router.push('/login');
+      }
+      setAuthLoading(false);
     });
-    setShowCertificate(false);
+    return () => unsubscribe();
+  }, [router]);
+
+  // Load user certificates with better error handling
+  const loadUserCertificates = async (userId: string) => {
+    setLoading(true);
+    try {
+      const certificatesRef = collection(db, 'certificates');
+      const certQuery = query(certificatesRef, where('userId', '==', userId));
+      console.log('Querying certificates for user:', userId);
+      const querySnapshot = await getDocs(certQuery);
+      console.log('Certificates retrieved:', querySnapshot.size);
+      const userCertificates: Certificate[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        userCertificates.push({
+          id: doc.id,
+          userId: data.userId,
+          courseId: data.courseId,
+          courseName: data.courseName,
+          studentName: data.studentName,
+          completionDate: data.completionDate?.toDate() || new Date(),
+          issuedDate: data.issuedDate?.toDate() || new Date(),
+          certificateUrl: data.certificateUrl,
+        });
+      });
+
+      // Check for completed courses without certificates and generate them
+      const progressRef = collection(db, 'users', userId, 'courseProgress');
+      const progressQuery = query(progressRef, where('completed', '==', true));
+      console.log('Querying completed courses for user:', userId);
+      const progressSnapshot = await getDocs(progressQuery);
+      console.log('Completed courses found:', progressSnapshot.size);
+
+      for (const progressDoc of progressSnapshot.docs) {
+        const progressData = progressDoc.data();
+        const existingCert = userCertificates.find(cert => cert.courseId === progressData.courseId);
+        
+        if (!existingCert && !progressData.certificateGenerated) {
+          try {
+            const courseRef = doc(db, 'courses', progressData.courseId);
+            const courseSnap = await getDoc(courseRef);
+            
+            if (courseSnap.exists()) {
+              const courseData = courseSnap.data();
+              const certificateData = {
+                userId,
+                courseId: progressData.courseId,
+                courseName: courseData.title || 'Untitled Course',
+                studentName: user?.displayName || user?.email?.split('@')[0] || 'Student',
+                completionDate: progressData.completionDate?.toDate() || new Date(),
+                issuedDate: new Date(),
+              };
+              
+              console.log('Generating certificate for course:', progressData.courseId);
+              const certificateRef = await addDoc(collection(db, 'certificates'), certificateData);
+              console.log('Certificate created with ID:', certificateRef.id);
+              
+              await updateDoc(progressDoc.ref, {
+                certificateGenerated: true,
+                certificateId: certificateRef.id
+              });
+              console.log('Updated progress with certificate ID:', certificateRef.id);
+              
+              userCertificates.push({ ...certificateData, id: certificateRef.id });
+              toast.success(`Certificate generated for ${courseData.title}`);
+            } else {
+              console.warn(`Course ${progressData.courseId} not found for certificate generation`);
+            }
+          } catch (certError) {
+            console.error(`Error generating certificate for course ${progressData.courseId}:`, certError);
+          }
+        }
+      }
+
+      // Sort certificates client-side (default: newest first)
+      setCertificates(userCertificates.sort((a, b) => b.issuedDate.getTime() - a.issuedDate.getTime()));
+    } catch (error: any) {
+      console.error('Error loading certificates:', error, {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+      toast.error(`Failed to load certificates: ${error.message || 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Theme classes
-  const themeClasses = {
-    background: isDarkMode 
-      ? 'bg-gradient-to-br from-gray-900 via-slate-900 to-blue-900' 
-      : 'bg-gradient-to-br from-blue-50 via-white to-indigo-50',
-    cardBg: isDarkMode 
-      ? 'bg-gray-800/80 backdrop-blur-sm border-gray-700/50' 
-      : 'bg-white/80 backdrop-blur-sm border-white/50',
-    titleText: isDarkMode ? 'text-white' : 'text-slate-800',
-    bodyText: isDarkMode ? 'text-gray-300' : 'text-slate-600',
-    inputBg: isDarkMode 
-      ? 'bg-gray-700/50 border-gray-600/50 text-white placeholder-gray-400' 
-      : 'bg-white/70 border-slate-200 text-slate-900 placeholder-slate-400',
-    inputFocus: isDarkMode 
-      ? 'focus:ring-amber-400/50 focus:border-amber-400' 
-      : 'focus:ring-blue-500/30 focus:border-blue-500',
-    labelText: isDarkMode ? 'text-gray-200' : 'text-slate-700',
-    buttonPrimary: isDarkMode 
-      ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-lg shadow-amber-500/25' 
-      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/25',
-    buttonSecondary: isDarkMode 
-      ? 'bg-gray-700/50 hover:bg-gray-600/50 text-gray-200 border-gray-600/50' 
-      : 'bg-slate-100/70 hover:bg-slate-200/70 text-slate-700 border-slate-200',
-    iconColor: isDarkMode ? 'text-amber-400' : 'text-blue-600',
-    certificateBg: 'bg-gradient-to-br from-white to-slate-50',
-    certificateText: 'text-slate-800',
-    certificateAccent: 'text-amber-600',
-    featureCardBg: isDarkMode 
-      ? 'bg-gray-800/50 backdrop-blur-sm border-gray-700/30' 
-      : 'bg-white/60 backdrop-blur-sm border-white/30'
+  // Filter and sort certificates
+  const getFilteredAndSortedCertificates = () => {
+    let filtered = certificates;
+
+    // Search filter
+    if (searchTerm) {
+      filtered = filtered.filter(cert => 
+        cert.courseName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cert.studentName.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Date filter
+    const currentYear = new Date().getFullYear();
+    if (filterBy === 'thisYear') {
+      filtered = filtered.filter(cert => cert.issuedDate.getFullYear() === currentYear);
+    } else if (filterBy === 'lastYear') {
+      filtered = filtered.filter(cert => cert.issuedDate.getFullYear() === currentYear - 1);
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          return b.issuedDate.getTime() - a.issuedDate.getTime();
+        case 'oldest':
+          return a.issuedDate.getTime() - b.issuedDate.getTime();
+        case 'course':
+          return a.courseName.localeCompare(b.courseName);
+        default:
+          return 0;
+      }
+    });
+
+    return filtered;
   };
+
+  if (authLoading || loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex justify-center items-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-300">Loading your certificates...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const filteredCertificates = getFilteredAndSortedCertificates();
 
   return (
-    <div className={`min-h-screen ${themeClasses.background} py-12 px-4 transition-all duration-700`}>
-      <div className="max-w-7xl mx-auto">
-        {/* Enhanced Header */}
-        <div className="text-center mb-16">
-          <div className="flex justify-between items-start mb-8">
-            <div className="flex-1 flex justify-center">
-              <div className="flex items-center gap-4">
-                <div className={`p-3 rounded-2xl ${isDarkMode ? 'bg-amber-500/20' : 'bg-blue-100'} ${isDarkMode ? 'border border-amber-500/30' : ''}`}>
-                  <GraduationCap className={`h-14 w-14 ${themeClasses.iconColor}`} />
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Header */}
+      <div className="bg-white dark:bg-gray-800 shadow-sm">
+        <div className="container mx-auto px-4 py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800 transition-colors">
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Courses
+              </Link>
+              <div className="h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg">
+                  <Award className="h-6 w-6 text-white" />
                 </div>
-                <div className="text-left">
-                  <h1 className={`text-5xl md:text-6xl font-bold ${themeClasses.titleText} tracking-tight`}>
-                    Quisef Learn
-                  </h1>
-                  <p className={`text-lg ${themeClasses.bodyText} mt-1`}>Certificate Generator</p>
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-800 dark:text-white">My Certificates</h1>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {certificates.length} certificate{certificates.length !== 1 ? 's' : ''} earned
+                  </p>
                 </div>
               </div>
             </div>
-            
-            {/* Enhanced Dark Mode Toggle */}
-            <button
-              onClick={toggleDarkMode}
-              className={`group flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 shadow-lg ${
-                isDarkMode 
-                  ? 'bg-gray-800/80 hover:bg-gray-700/80 text-amber-400 border border-gray-700/50' 
-                  : 'bg-white/80 hover:bg-white text-slate-700 border border-white/50'
-              }`}
-              aria-label="Toggle dark mode"
-            >
-              {isDarkMode ? (
-                <>
-                  <Sun className="h-5 w-5 group-hover:rotate-180 transition-transform duration-500" />
-                  <span className="hidden sm:inline font-medium">Light</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="h-5 w-5 group-hover:-rotate-12 transition-transform duration-300" />
-                  <span className="hidden sm:inline font-medium">Dark</span>
-                </>
-              )}
-            </button>
+            <div className="hidden md:flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4" />
+                <span>{user?.displayName || user?.email}</span>
+              </div>
+            </div>
           </div>
-          
-          <div className="max-w-2xl mx-auto">
-            <p className={`text-xl ${themeClasses.bodyText} leading-relaxed`}>
-              Create beautiful, professional certificates for course completions in seconds
-            </p>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-4 py-8">
+        {/* Filters and Search */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-8">
+          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+            {/* Search */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+              <input
+                type="text"
+                placeholder="Search certificates..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+              />
+            </div>
+
+            {/* Filters */}
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2">
+                <Filter className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+                <select
+                  value={filterBy}
+                  onChange={(e) => setFilterBy(e.target.value as 'all' | 'thisYear' | 'lastYear')}
+                  className="px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="all">All Time</option>
+                  <option value="thisYear">This Year</option>
+                  <option value="lastYear">Last Year</option>
+                </select>
+              </div>
+              
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest' | 'course')}
+                className="px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+              >
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="course">Course Name</option>
+              </select>
+            </div>
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-12">
-          {/* Enhanced Form Section */}
-          <div className={`${themeClasses.cardBg} rounded-3xl p-8 md:p-10 shadow-2xl border transition-all duration-300`}>
-            <div className="flex items-center gap-3 mb-8">
-              <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-amber-500/20' : 'bg-blue-100'}`}>
-                <User className={`h-6 w-6 ${themeClasses.iconColor}`} />
+        {/* Certificates Grid */}
+        {filteredCertificates.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="mb-6">
+              <div className="mx-auto w-24 h-24 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
+                <Award className="h-12 w-12 text-gray-400 dark:text-gray-500" />
               </div>
-              <h2 className={`text-3xl font-bold ${themeClasses.titleText}`}>
-                Course Information
-              </h2>
-            </div>
-            
-            <form onSubmit={generateCertificate} className="space-y-8">
-              <div className="space-y-2">
-                <label className={`block ${themeClasses.labelText} font-semibold text-lg`}>
-                  Student Name *
-                </label>
-                <input
-                  type="text"
-                  name="studentName"
-                  value={formData.studentName}
-                  onChange={handleInputChange}
-                  required
-                  className={`w-full px-5 py-4 rounded-xl border-2 ${themeClasses.inputBg} focus:outline-none focus:ring-4 ${themeClasses.inputFocus} transition-all duration-200 text-lg`}
-                  placeholder="Enter the student's full name"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className={`block ${themeClasses.labelText} font-semibold text-lg`}>
-                  Course Name *
-                </label>
-                <input
-                  type="text"
-                  name="courseName"
-                  value={formData.courseName}
-                  onChange={handleInputChange}
-                  required
-                  className={`w-full px-5 py-4 rounded-xl border-2 ${themeClasses.inputBg} focus:outline-none focus:ring-4 ${themeClasses.inputFocus} transition-all duration-200 text-lg`}
-                  placeholder="Enter the course name"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className={`block ${themeClasses.labelText} font-semibold text-lg`}>
-                  Completion Date *
-                </label>
-                <input
-                  type="date"
-                  name="completionDate"
-                  value={formData.completionDate}
-                  onChange={handleInputChange}
-                  required
-                  className={`w-full px-5 py-4 rounded-xl border-2 ${themeClasses.inputBg} focus:outline-none focus:ring-4 ${themeClasses.inputFocus} transition-all duration-200 text-lg`}
-                />
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="submit"
-                  className={`flex-1 ${themeClasses.buttonPrimary} text-white font-bold py-4 px-8 rounded-xl transition-all duration-300 flex items-center justify-center gap-3 text-lg transform hover:scale-105`}
-                >
-                  <Sparkles className="h-6 w-6" />
-                  Generate Certificate
-                </button>
-                
-                {showCertificate && (
-                  <button
-                    type="button"
-                    onClick={resetForm}
-                    className={`px-8 py-4 ${themeClasses.buttonSecondary} font-semibold rounded-xl transition-all duration-300 border transform hover:scale-105`}
-                  >
-                    Reset
+              <h3 className="text-2xl font-semibold text-gray-800 dark:text-gray-200 mb-2">
+                {searchTerm ? 'No certificates found' : 'No certificates yet'}
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md mx-auto">
+                {searchTerm 
+                  ? `No certificates match "${searchTerm}". Try a different search term.`
+                  : certificates.length === 0 
+                    ? 'Complete your first course to earn a certificate and showcase your achievements!'
+                    : 'Certificates are missing for some completed courses. Contact support or try refreshing.'
+                }
+              </p>
+              {!searchTerm && (
+                <Link href="/courses">
+                  <button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105">
+                    Browse Courses
                   </button>
-                )}
-              </div>
-            </form>
-          </div>
-
-          {/* Enhanced Certificate Preview */}
-          <div className={`${themeClasses.cardBg} rounded-3xl p-8 md:p-10 shadow-2xl border transition-all duration-300`}>
-            <div className="flex items-center gap-3 mb-8">
-              <div className={`p-2 rounded-lg ${isDarkMode ? 'bg-amber-500/20' : 'bg-blue-100'}`}>
-                <BookOpen className={`h-6 w-6 ${themeClasses.iconColor}`} />
-              </div>
-              <h2 className={`text-3xl font-bold ${themeClasses.titleText}`}>
-                Preview
-              </h2>
+                </Link>
+              )}
             </div>
-
-            {showCertificate ? (
-              <div className="space-y-8">
-                <div 
-                  ref={certificateRef}
-                  className={`${themeClasses.certificateBg} p-8 md:p-12 rounded-2xl border-4 border-amber-400 shadow-2xl relative overflow-hidden`}
-                >
-                  {/* Decorative elements */}
-                  <div className="absolute top-4 left-4 w-16 h-16 border-l-4 border-t-4 border-amber-400 rounded-tl-lg"></div>
-                  <div className="absolute top-4 right-4 w-16 h-16 border-r-4 border-t-4 border-amber-400 rounded-tr-lg"></div>
-                  <div className="absolute bottom-4 left-4 w-16 h-16 border-l-4 border-b-4 border-amber-400 rounded-bl-lg"></div>
-                  <div className="absolute bottom-4 right-4 w-16 h-16 border-r-4 border-b-4 border-amber-400 rounded-br-lg"></div>
-                  
-                  <div className="text-center space-y-6 relative z-10">
-                    <div className="flex justify-center">
-                      <div className="p-4 bg-amber-100 rounded-full">
-                        <Star className="h-16 w-16 text-amber-600" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filteredCertificates.map((certificate) => (
+              <div
+                key={certificate.id}
+                className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden"
+              >
+                {/* Certificate Preview */}
+                <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 p-6 border-b-4 border-amber-400">
+                  <div className="text-center">
+                    <div className="mb-4">
+                      <div className="mx-auto w-16 h-16 bg-gradient-to-r from-amber-400 to-orange-500 rounded-full flex items-center justify-center">
+                        <Star className="h-8 w-8 text-white" />
                       </div>
                     </div>
-                    
-                    <div>
-                      <h3 className="text-3xl md:text-4xl font-bold text-slate-800 mb-2">
-                        CERTIFICATE OF COMPLETION
-                      </h3>
-                      <div className="w-32 h-1 bg-amber-400 mx-auto rounded-full"></div>
-                    </div>
-                    
-                    <p className="text-slate-600 text-lg italic">
-                      This is to certify that
-                    </p>
-                    
-                    <div>
-                      <h4 className="text-2xl md:text-3xl font-bold text-amber-600 uppercase tracking-wide">
-                        {formData.studentName}
-                      </h4>
-                      <div className="w-48 h-0.5 bg-amber-400 mx-auto mt-2"></div>
-                    </div>
-                    
-                    <p className="text-slate-600 text-lg italic">
-                      has successfully completed the course
-                    </p>
-                    
-                    <h5 className="text-xl md:text-2xl font-bold text-slate-800">
-                      {formData.courseName}
+                    <h3 className="text-lg font-bold text-amber-800 dark:text-amber-200 mb-2">
+                      CERTIFICATE OF COMPLETION
+                    </h3>
+                    <div className="w-16 h-0.5 bg-amber-400 mx-auto mb-3"></div>
+                    <p className="text-sm text-amber-700 dark:text-amber-300 mb-2">This certifies that</p>
+                    <h4 className="text-base font-bold text-amber-800 dark:text-amber-200 mb-2">
+                      {certificate.studentName}
+                    </h4>
+                    <p className="text-sm text-amber-600 dark:text-amber-400">has completed</p>
+                    <h5 className="text-sm font-bold text-amber-800 dark:text-amber-200 line-clamp-2">
+                      {certificate.courseName}
                     </h5>
-                    
-                    <div className="text-slate-600 space-y-2">
-                      <p className="text-lg">
-                        Completed on {new Date(formData.completionDate).toLocaleDateString('en-US', { 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric' 
-                        })}
-                      </p>
-                    </div>
-                    
-                    <div className="pt-8">
-                      <div className="text-slate-800 font-bold text-xl">QUISEF LEARN</div>
-                      <p className="text-slate-500 text-sm mt-1">
-                        Issued on {new Date().toLocaleDateString()}
-                      </p>
-                    </div>
                   </div>
                 </div>
 
-                <button
-                  onClick={downloadCertificate}
-                  className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-4 px-8 rounded-xl transition-all duration-300 flex items-center justify-center gap-3 text-lg shadow-lg shadow-green-500/25 transform hover:scale-105"
-                >
-                  <Download className="h-6 w-6" />
-                  Download Certificate
-                </button>
-              </div>
-            ) : (
-              <div className={`text-center ${themeClasses.bodyText} py-16`}>
-                <div className={`p-6 rounded-full ${isDarkMode ? 'bg-amber-500/10' : 'bg-blue-50'} inline-block mb-6`}>
-                  <Award className="h-20 w-20 opacity-50" />
+                {/* Certificate Details */}
+                <div className="p-6">
+                  <div className="space-y-3 mb-6">
+                    <div className="flex items-center gap-3">
+                      <Calendar className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Completed</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {certificate.completionDate.toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      <BookOpen className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Course</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-1" title={certificate.courseName}>
+                          {certificate.courseName}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <Award className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Issued</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {certificate.issuedDate.toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="space-y-3">
+                    <button
+                      onClick={() => downloadCertificate(certificate)}
+                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-all duration-300 flex items-center justify-center gap-2 transform hover:scale-105"
+                    >
+                      <Download className="h-5 w-5" />
+                      Download Certificate
+                    </button>
+                    
+                    <Link href={`/courses/${certificate.courseId}`}>
+                      <button className="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 font-semibold py-3 px-4 rounded-xl transition-all duration-300 flex items-center justify-center gap-2">
+                        <BookOpen className="h-5 w-5" />
+                        View Course
+                      </button>
+                    </Link>
+                  </div>
                 </div>
-                <h3 className={`text-2xl font-semibold ${themeClasses.titleText} mb-3`}>
-                  Ready to Create?
-                </h3>
-                <p className="text-lg mb-2">Fill out the form to generate your certificate</p>
-                <p className="text-sm opacity-75">All fields are required</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Summary Stats */}
+        {certificates.length > 0 && (
+          <div className="mt-12 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-8">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6 text-center">
+              Your Learning Journey
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="text-center">
+                <div className="mx-auto w-16 h-16 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full flex items-center justify-center mb-4">
+                  <Award className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-3xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+                  {certificates.length}
+                </div>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Certificate{certificates.length !== 1 ? 's' : ''} Earned
+                </p>
+              </div>
+              
+              <div className="text-center">
+                <div className="mx-auto w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mb-4">
+                  <BookOpen className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-3xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+                  {new Set(certificates.map(cert => cert.courseId)).size}
+                </div>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Course{new Set(certificates.map(cert => cert.courseId)).size !== 1 ? 's' : ''} Completed
+                </p>
+              </div>
+              
+              <div className="text-center">
+                <div className="mx-auto w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mb-4">
+                  <Star className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-3xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+                  {certificates.length > 0 
+                    ? Math.round((certificates.filter(cert => 
+                        cert.issuedDate.getFullYear() === new Date().getFullYear()
+                      ).length / certificates.length) * 100)
+                    : 0}%
+                </div>
+                <p className="text-gray-600 dark:text-gray-400">This Year</p>
+              </div>
+            </div>
+
+            {/* Recent Achievement */}
+            {certificates.length > 0 && (
+              <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
+                <div className="text-center">
+                  <p className="text-gray-600 dark:text-gray-400 mb-2">Most Recent Achievement</p>
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl p-4 inline-block">
+                    <p className="font-bold text-amber-800 dark:text-amber-200">
+                      {certificates[0].courseName}
+                    </p>
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                      Completed {certificates[0].completionDate.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
-        </div>
+        )}
 
-        {/* Enhanced Features Section */}
-        <div className="mt-20">
-          <h3 className={`text-3xl font-bold ${themeClasses.titleText} text-center mb-12`}>
-            Why Choose Our Certificate?
-          </h3>
-          
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className={`${themeClasses.featureCardBg} rounded-2xl p-8 text-center shadow-xl border transition-all duration-300 hover:scale-105`}>
-              <div className={`p-4 ${isDarkMode ? 'bg-amber-500/20' : 'bg-blue-100'} rounded-full inline-block mb-6`}>
-                <Download className={`h-10 w-10 ${themeClasses.iconColor}`} />
-              </div>
-              <h4 className={`${themeClasses.titleText} font-bold text-xl mb-3`}>Impct Your world</h4>
-              <p className={`${themeClasses.bodyText}`}>Using what you learn to develop novel solutions</p>
-            </div>
-            
-            
-            <div className={`${themeClasses.featureCardBg} rounded-2xl p-8 text-center shadow-xl border transition-all duration-300 hover:scale-105`}>
-              <div className={`p-4 ${isDarkMode ? 'bg-amber-500/20' : 'bg-blue-100'} rounded-full inline-block mb-6`}>
-                <Calendar className={`h-10 w-10 ${themeClasses.iconColor}`} />
-              </div>
-              <h4 className={`${themeClasses.titleText} font-bold text-xl mb-3`}>Successful Completion</h4>
-              <p className={`${themeClasses.bodyText}`}>Opportunities and Career advancement.</p>
-            </div>
+        {/* Call to Action */}
+        <div className="mt-12 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-8 text-white text-center">
+          <h2 className="text-2xl font-bold mb-4">Ready to Learn More?</h2>
+          <p className="text-blue-100 mb-6 max-w-2xl mx-auto">
+            Continue your learning journey with Quisef Learn. Explore new courses and add more certificates to your collection.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link href="/courses">
+              <button className="bg-white text-blue-600 hover:bg-gray-100 font-bold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105">
+                Browse All Courses
+              </button>
+            </Link>
+           
           </div>
         </div>
       </div>
     </div>
   );
-};
-
-export default CertificateGenerator;
+}

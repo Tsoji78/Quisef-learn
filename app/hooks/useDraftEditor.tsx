@@ -28,7 +28,7 @@ const MEDIA_LIMITS = {
   },
   video: {
     maxSize: 10 * 1024 * 1024, // 10MB
-    accept: 'video/mp4,video/webm,video/mov',
+    accept: 'video/mp4,video/webm,video/quicktime,video/x-msvideo',
   },
   gif: {
     maxSize: 5 * 1024 * 1024, // 5MB
@@ -366,7 +366,14 @@ export const useDraftEditor = (
       if (!file) {
         const input = document.createElement('input');
         input.setAttribute('type', 'file');
-        input.setAttribute('accept', config.accept);
+        // Use file extensions instead of MIME types for file picker
+        const extensionMap = {
+          image: '.jpg,.jpeg,.png,.webp',
+          video: '.mp4,.webm,.mov,.avi',
+          gif: '.gif',
+          sticker: '.png,.webp,.svg'
+        };
+        input.setAttribute('accept', extensionMap[mediaType]);
         input.onchange = async () => {
           const selectedFile = input.files?.[0];
           if (selectedFile) {
@@ -377,6 +384,15 @@ export const useDraftEditor = (
         return;
       }
 
+      console.log('File details:', {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        mediaType,
+        acceptedTypes: config.accept
+      });
+
+      // Size validation
       if (file.size > config.maxSize) {
         setModal({
           isOpen: true,
@@ -386,23 +402,56 @@ export const useDraftEditor = (
         return;
       }
 
-      if (!config.accept.split(',').some((type) => file.type.startsWith(type.trim()))) {
+      // Enhanced file type validation
+      const isValidFileType = () => {
+        const acceptedTypes = config.accept.split(',').map(type => type.trim());
+        const fileName = file.name.toLowerCase();
+        
+        // Check MIME type first
+        if (acceptedTypes.some(type => file.type === type)) {
+          return true;
+        }
+        
+        // Fallback to file extension for problematic MIME types
+        if (mediaType === 'video') {
+          return fileName.endsWith('.mp4') || 
+                fileName.endsWith('.webm') || 
+                fileName.endsWith('.mov') ||
+                fileName.endsWith('.avi') ||
+                file.type.startsWith('video/');
+        }
+        
+        // For other types, use MIME type matching
+        return acceptedTypes.some(type => file.type.startsWith(type.split('/')[0] + '/'));
+      };
+
+      if (!isValidFileType()) {
+        console.error('Invalid file type:', file.type, 'for', mediaType);
         setModal({
           isOpen: true,
           status: 'error',
-          message: `Invalid file type. Please select a valid ${mediaType} file.`,
+          message: `Invalid file type: ${file.type}. Please select a valid ${mediaType} file.`,
         });
         return;
       }
 
       try {
         dispatch({ type: 'SET_UPLOADING', moduleIndex, uploading: true });
-        setModal({ isOpen: true, status: 'uploading', message: `Uploading ${mediaType}...` });
+        setModal({ 
+          isOpen: true, 
+          status: 'uploading', 
+          message: `Uploading ${mediaType}... (${(file.size / (1024 * 1024)).toFixed(1)}MB)` 
+        });
 
-        const cloudinaryType = mediaType === 'gif' || mediaType === 'sticker' ? 'image' : mediaType;
+        // Correct resource type mapping
+        const cloudinaryType = (mediaType === 'gif' || mediaType === 'sticker') ? 'image' : mediaType;
+        console.log('Uploading to Cloudinary as:', cloudinaryType);
+        
         const url = await uploadToCloudinary(file, cloudinaryType);
+        console.log('Upload successful:', url);
 
         let dimensions = { width: 400, height: 300 };
+        
         if (mediaType === 'image' || mediaType === 'gif' || mediaType === 'sticker') {
           dimensions = await new Promise((resolve) => {
             const img = new Image();
@@ -410,11 +459,47 @@ export const useDraftEditor = (
               const { width, height } = calculateResponsiveDimensions(img.width, img.height);
               resolve({ width, height });
             };
-            img.onerror = () => resolve({ width: 400, height: 300 });
+            img.onerror = () => {
+              console.warn('Failed to load image dimensions');
+              resolve({ width: 400, height: 300 });
+            };
             img.src = url;
           });
         } else if (mediaType === 'video') {
-          dimensions = { width: 400, height: 225 }; // 16:9 aspect ratio
+          // Try to get video dimensions, but don't fail if we can't
+          try {
+            dimensions = await new Promise((resolve, reject) => {
+              const video = document.createElement('video');
+              const timeout = setTimeout(() => {
+                console.warn('Video dimension detection timeout');
+                resolve({ width: 400, height: 225 });
+              }, 3000);
+              
+              video.onloadedmetadata = () => {
+                clearTimeout(timeout);
+                if (video.videoWidth && video.videoHeight) {
+                  const { width, height } = calculateResponsiveDimensions(
+                    video.videoWidth, 
+                    video.videoHeight
+                  );
+                  resolve({ width, height });
+                } else {
+                  resolve({ width: 400, height: 225 });
+                }
+              };
+              
+              video.onerror = () => {
+                clearTimeout(timeout);
+                console.warn('Could not load video metadata');
+                resolve({ width: 400, height: 225 });
+              };
+              
+              video.src = url;
+            });
+          } catch (error) {
+            console.warn('Error getting video dimensions:', error);
+            dimensions = { width: 400, height: 225 };
+          }
         }
 
         const currentState = getEditorState(moduleIndex);
@@ -433,6 +518,8 @@ export const useDraftEditor = (
             adjustable: true,
             responsive: true,
             uploadedAt: new Date().toISOString(),
+            originalFileSize: file.size,
+            mimeType: file.type,
           }
         );
 
@@ -452,8 +539,9 @@ export const useDraftEditor = (
         setTimeout(() => {
           setModal({ isOpen: false, status: null, message: '' });
         }, 2000);
+        
       } catch (error) {
-        console.error(`Upload error:`, error);
+        console.error(`${mediaType} upload error:`, error);
         setModal({
           isOpen: true,
           status: 'error',
@@ -465,7 +553,6 @@ export const useDraftEditor = (
     },
     [getEditorState, handleEditorStateChange, setModal]
   );
-
   const handleVideoEmbed = useCallback(
     (moduleIndex: number, embedUrl: string, originalUrl: string) => {
       if (!embedUrl || !originalUrl) return;
