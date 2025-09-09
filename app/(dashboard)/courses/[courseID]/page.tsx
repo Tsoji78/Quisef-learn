@@ -79,14 +79,21 @@ export default function CourseEnrollmentPage() {
   // Handle authentication state
   useEffect(() => {
     const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       console.log('Auth state changed, user:', currentUser?.uid);
       setUser(currentUser);
       setAuthLoading(false);
+      
+      // Only check enrollment after we have both user and courseId
       if (currentUser && courseId && !enrollmentChecked.current) {
-        checkEnrollmentStatus(currentUser.uid, courseId);
+        try {
+          await checkEnrollmentStatus(currentUser.uid, courseId);
+        } catch (err) {
+          console.error('Error checking enrollment:', err);
+        }
       }
     });
+    
     return () => unsubscribe();
   }, [courseId]);
 
@@ -120,44 +127,65 @@ export default function CourseEnrollmentPage() {
 
   // Fetch course details
   useEffect(() => {
-    if (!courseId || typeof courseId !== 'string' || courseId.trim() === '') {
-      console.error('Invalid or missing course ID:', params);
-      setError('Invalid or missing course ID in the URL');
+  // Ensure we have valid params before proceeding
+    if (!params?.courseId) {
+      console.error('No courseId in params:', params);
+      setError('Course ID is missing from the URL');
       setLoading(false);
       return;
     }
+
+    const courseIdString = Array.isArray(params.courseId) 
+      ? params.courseId[0] 
+      : params.courseId;
+      
+    if (!courseIdString || courseIdString.trim() === '') {
+      console.error('Invalid courseId:', courseIdString);
+      setError('Invalid course ID in the URL');
+      setLoading(false);
+      return;
+    }
+
+    // setCourseId(courseIdString); // Store in state if needed
+  }, [params]);
+
+  // Separate effect for course fetching after courseId is confirmed
+  useEffect(() => {
+    if (!courseId || authLoading) return;
+    
     const fetchCourse = async () => {
       setLoading(true);
       try {
         console.log('Fetching course with ID:', courseId);
         const docRef = doc(db, 'courses', courseId);
         const docSnap = await getDoc(docRef);
+        
         if (docSnap.exists()) {
           const data = docSnap.data();
           setCourse({
             id: docSnap.id,
-            title: data.title || 'Untitled Course',
-            instructor: data.instructor || 'Unknown Instructor',
-            description: data.description || 'No description available.',
-            level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
-            duration: data.duration || 'Unknown',
-            price: data.price || 0,
-            originalPrice: data.originalPrice,
-            thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
-            category: data.category || 'Uncategorized',
-            modules: Array.isArray(data.modules) ? data.modules : [],
-            rating: data.rating || 4.5,
-            totalStudents: data.totalStudents || 0,
-            lastUpdated: data.lastUpdated || 'Recently',
-            language: data.language || 'English',
-            certificate: data.certificate || false,
-            requirements: data.requirements || [],
-            whatYouLearn: data.whatYouLearn || [],
-            targetAudience: data.targetAudience || [],
-            instructor_bio: data.instructor_bio,
-            instructor_image: data.instructor_image,
-            preview_video: data.preview_video,
-            groupId: data.groupId,
+            title: data.title ?? '',
+            instructor: data.instructor ?? '',
+            description: data.description ?? '',
+            level: data.level ?? 'Beginner',
+            duration: data.duration ?? '',
+            price: data.price ?? 0,
+            originalPrice: data.originalPrice ?? undefined,
+            thumbnail: data.thumbnail ?? '',
+            category: data.category ?? '',
+            modules: data.modules ?? [],
+            rating: data.rating ?? 0,
+            totalStudents: data.totalStudents ?? 0,
+            lastUpdated: data.lastUpdated ?? '',
+            language: data.language ?? '',
+            certificate: data.certificate ?? false,
+            requirements: data.requirements ?? [],
+            whatYouLearn: data.whatYouLearn ?? [],
+            targetAudience: data.targetAudience ?? [],
+            instructor_bio: data.instructor_bio ?? '',
+            instructor_image: data.instructor_image ?? '',
+            preview_video: data.preview_video ?? '',
+            groupId: data.groupId ?? undefined,
           });
           setError(null);
         } else {
@@ -166,13 +194,21 @@ export default function CourseEnrollmentPage() {
         }
       } catch (err: any) {
         console.error('Error fetching course:', err);
-        setError(`Failed to load course: ${err.message || 'Unknown error'}`);
+        // More specific error handling
+        if (err.code === 'permission-denied') {
+          setError('You do not have permission to access this course');
+        } else if (err.code === 'not-found') {
+          setError('Course not found');
+        } else {
+          setError(`Failed to load course: ${err.message}`);
+        }
       } finally {
         setLoading(false);
       }
     };
+    
     fetchCourse();
-  }, [courseId]);
+  }, [courseId, authLoading]);
 
   // Handle enrollment
   const handleEnrollment = async () => {
