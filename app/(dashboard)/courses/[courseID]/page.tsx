@@ -126,28 +126,6 @@ export default function CourseEnrollmentPage() {
   };
 
   // Fetch course details
-  useEffect(() => {
-  // Ensure we have valid params before proceeding
-    if (!params?.courseId) {
-      console.error('No courseId in params:', params);
-      setError('Course ID is missing from the URL');
-      setLoading(false);
-      return;
-    }
-
-    const courseIdString = Array.isArray(params.courseId) 
-      ? params.courseId[0] 
-      : params.courseId;
-      
-    if (!courseIdString || courseIdString.trim() === '') {
-      console.error('Invalid courseId:', courseIdString);
-      setError('Invalid course ID in the URL');
-      setLoading(false);
-      return;
-    }
-
-    // setCourseId(courseIdString); // Store in state if needed
-  }, [params]);
 
   // Separate effect for course fetching after courseId is confirmed
   useEffect(() => {
