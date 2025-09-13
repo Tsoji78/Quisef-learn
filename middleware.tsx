@@ -25,6 +25,7 @@ export function middleware(request: NextRequest) {
 
   // If no token, redirect to the login page
   if (!token) {
+    console.log(`No token found for path: ${path}`); // Debug: Log missing tokens
     return NextResponse.redirect(new URL('/login', request.nextUrl.origin));
   }
 
@@ -32,7 +33,9 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Apply middleware to all routes except the specified public paths
+// Apply middleware to all routes except the specified public paths (fixed matcher)
 export const config = {
-  matcher: ['//:path*'], // Adjust based on your needs
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ],
 };
