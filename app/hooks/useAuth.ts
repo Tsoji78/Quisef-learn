@@ -1,5 +1,6 @@
+// hooks/useAuth.tsx (updated)
 import { useState, useEffect } from 'react';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'firebase/auth'; // Add setPersistence import
 import { useRouter } from 'next/navigation';
 
 interface UseAuthOptions {
@@ -17,25 +18,34 @@ export const useAuth = (options: UseAuthOptions = {}) => {
 
   useEffect(() => {
     const auth = getAuth();
+    
+    // Explicitly set persistence to local (ensures cross-tab/session survival)
+    setPersistence(auth, browserLocalPersistence)
+      .then(() => {
+        console.log('Auth persistence set to local'); // Debug: Confirm setup
+      })
+      .catch((err) => {
+        console.error('Failed to set auth persistence:', err); // Debug: Catch failures
+      });
+
     const unsubscribe = onAuthStateChanged(
       auth, 
       (currentUser) => {
+        console.log('onAuthStateChanged fired:', currentUser ? currentUser.uid : 'null'); // Debug: Track state changes
         setUser(currentUser);
         setLoading(false);
         setError(null);
         
-        // Only redirect if explicitly requested and no user
         if (!currentUser && redirectToLogin) {
           router.push('/login');
         }
       },
       (authError) => {
-        console.error('Auth state change error:', authError);
+        console.error('Auth state change error:', authError); // Already there—good!
         setError(authError.message);
         setUser(null);
         setLoading(false);
         
-        // Redirect on error if auth is required
         if (requireAuth) {
           router.push('/login');
         }
@@ -48,7 +58,7 @@ export const useAuth = (options: UseAuthOptions = {}) => {
   return { user, loading, error };
 };
 
-// Convenience hooks for specific use cases
+// Convenience hooks unchanged...
 export const useAuthRequired = () => {
   return useAuth({ requireAuth: true, redirectToLogin: true });
 };
