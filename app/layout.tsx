@@ -1,6 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
+import { useAuth } from '@/hooks/useAuth'; // If needed for provider
+
 
 
 

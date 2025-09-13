@@ -11,7 +11,8 @@ export function middleware(request: NextRequest) {
     '/',
     '/about',
     '/catalogue',
-    '/contact',// Add other public routes if necessary
+    
+    // Add other public routes if necessary
   ];
 
   // Construct the URL pathname
