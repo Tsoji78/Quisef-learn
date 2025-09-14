@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore'
+import {  browserSessionPersistence, setPersistence } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -17,3 +18,12 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
+
+// Set persistence for faster restores (call this once on app load)
+setPersistence(auth, browserSessionPersistence)
+  .then(() => {
+    console.log('Auth persistence set to session');
+  })
+  .catch((error) => {
+    console.error('Error setting persistence:', error);
+  });

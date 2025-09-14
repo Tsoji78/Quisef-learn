@@ -70,6 +70,7 @@ export default function CourseEnrollmentPage() {
   const [user, setUser] = useState<any>(null);
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
+  const [authResolved, setAuthResolved] = useState(false); // New: Track if auth listener fired
   const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
@@ -78,24 +79,31 @@ export default function CourseEnrollmentPage() {
 
   // Handle authentication state
   useEffect(() => {
-    const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(getAuth(), async (currentUser) => {
       console.log('Auth state changed, user:', currentUser?.uid);
       setUser(currentUser);
-      setAuthLoading(false);
       
-      // Only check enrollment after we have both user and courseId
+      // Mark auth as resolved once listener fires (handles initial delay)
+      if (!authResolved) {
+        setAuthResolved(true);
+      }
+
+      setAuthLoading(false);
+
       if (currentUser && courseId && !enrollmentChecked.current) {
         try {
           await checkEnrollmentStatus(currentUser.uid, courseId);
         } catch (err) {
           console.error('Error checking enrollment:', err);
         }
+      } else if (!currentUser && authResolved) {
+        // Only redirect after auth is resolved to avoid flash
+        router.push(`/login?redirect=/courses/${courseId}`);
       }
     });
-    
+
     return () => unsubscribe();
-  }, [courseId]);
+  }, [courseId, authResolved]); // Add authResolved to deps
 
   // Check enrollment status
   const checkEnrollmentStatus = async (userId: string, courseId: string) => {
@@ -332,7 +340,7 @@ export default function CourseEnrollmentPage() {
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   };
 
-  if (loading || authLoading) {
+  if (loading || authLoading || !authResolved) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>

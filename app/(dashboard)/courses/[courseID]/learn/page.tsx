@@ -80,6 +80,7 @@ export default function CourseDetailPage() {
   const [lastToastTime, setLastToastTime] = useState<number>(0);
   const [hasShownCompletionToast, setHasShownCompletionToast] = useState(false);
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [authResolved, setAuthResolved] = useState(false); // New
   const certificateRef = useRef<HTMLDivElement>(null);
 
   // Generate certificate automatically when course is completed
@@ -447,18 +448,23 @@ export default function CourseDetailPage() {
 
   useEffect(() => {
     setAuthLoading(true);
-    const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(getAuth(), (currentUser) => {
       setUser(currentUser);
+      
+      // Mark resolved
+      if (!authResolved) {
+        setAuthResolved(true);
+      }
+
       if (currentUser && courseId) {
         loadUserProgress(currentUser.uid, courseId);
-      } else if (!currentUser) {
+      } else if (!currentUser && authResolved) {
         router.push('/login');
       }
       setAuthLoading(false);
     });
     return () => unsubscribe();
-  }, [courseId, router]);
+  }, [courseId, authResolved]);
 
   const loadUserProgress = async (userId: string, courseId: string) => {
     try {
@@ -680,7 +686,7 @@ export default function CourseDetailPage() {
     }));
   };
 
-  if (authLoading || loading) {
+  if (loading || authLoading || !authResolved) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
