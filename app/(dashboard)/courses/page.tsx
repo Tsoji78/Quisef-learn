@@ -215,13 +215,7 @@ export default function CoursesPage() {
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.instructor}</span>
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.duration}</span>
                 </div>
-                {course.groupId && (
-                  <div className="mt-2">
-                    <Link href={`/groups?groupId=${course.groupId}`} className="text-blue-600 hover:underline text-sm">
-                      Join Study Group
-                    </Link>
-                  </div>
-                )}
+               
                 <div className="mt-4">
                   {user ? (
                     enrollmentStatus[course.id] ? (
