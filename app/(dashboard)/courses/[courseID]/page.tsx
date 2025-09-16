@@ -10,6 +10,8 @@ import Link from 'next/link';
 import parse from 'html-react-parser';
 import { toast } from 'react-hot-toast';
 import { Timestamp } from 'firebase/firestore';
+import { useTheme } from '@/context/ThemeContext'; // Updated import
+import { writeBatch } from 'firebase/firestore';
 
 interface Module {
   id: string;
@@ -60,6 +62,7 @@ interface Member {
 }
 
 export default function CourseEnrollmentPage() {
+  const { isDark } = useTheme(); // Use centralized ThemeProvider
   const router = useRouter();
   const params = useParams();
   const courseId = params.courseId as string;
@@ -70,7 +73,7 @@ export default function CourseEnrollmentPage() {
   const [user, setUser] = useState<any>(null);
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
-  const [authResolved, setAuthResolved] = useState(false); // New: Track if auth listener fired
+  const [authResolved, setAuthResolved] = useState(false);
   const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
@@ -82,12 +85,9 @@ export default function CourseEnrollmentPage() {
     const unsubscribe = onAuthStateChanged(getAuth(), async (currentUser) => {
       console.log('Auth state changed, user:', currentUser?.uid);
       setUser(currentUser);
-      
-      // Mark auth as resolved once listener fires (handles initial delay)
       if (!authResolved) {
         setAuthResolved(true);
       }
-
       setAuthLoading(false);
 
       if (currentUser && courseId && !enrollmentChecked.current) {
@@ -97,13 +97,12 @@ export default function CourseEnrollmentPage() {
           console.error('Error checking enrollment:', err);
         }
       } else if (!currentUser && authResolved) {
-        // Only redirect after auth is resolved to avoid flash
         router.push(`/login?redirect=/courses/${courseId}`);
       }
     });
 
     return () => unsubscribe();
-  }, [courseId, authResolved]); // Add authResolved to deps
+  }, [courseId, authResolved]);
 
   // Check enrollment status
   const checkEnrollmentStatus = async (userId: string, courseId: string) => {
@@ -116,7 +115,6 @@ export default function CourseEnrollmentPage() {
       enrollmentChecked.current = true;
       console.log('Enrollment status for course', courseId, ':', enrollmentSnap.exists());
 
-      // Fetch last module for resume link
       if (enrollmentSnap.exists()) {
         const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
         const progressSnap = await getDoc(progressRef);
@@ -134,18 +132,16 @@ export default function CourseEnrollmentPage() {
   };
 
   // Fetch course details
-
-  // Separate effect for course fetching after courseId is confirmed
   useEffect(() => {
     if (!courseId || authLoading) return;
-    
+
     const fetchCourse = async () => {
       setLoading(true);
       try {
         console.log('Fetching course with ID:', courseId);
         const docRef = doc(db, 'courses', courseId);
         const docSnap = await getDoc(docRef);
-        
+
         if (docSnap.exists()) {
           const data = docSnap.data();
           setCourse({
@@ -180,7 +176,6 @@ export default function CourseEnrollmentPage() {
         }
       } catch (err: any) {
         console.error('Error fetching course:', err);
-        // More specific error handling
         if (err.code === 'permission-denied') {
           setError('You do not have permission to access this course');
         } else if (err.code === 'not-found') {
@@ -192,7 +187,7 @@ export default function CourseEnrollmentPage() {
         setLoading(false);
       }
     };
-    
+
     fetchCourse();
   }, [courseId, authLoading]);
 
@@ -209,14 +204,27 @@ export default function CourseEnrollmentPage() {
       toast.error('Invalid course ID');
       return;
     }
+    
     setEnrolling(true);
+    setError(null);
+
+    // Add timeout to prevent infinite loading
+  const enrollmentTimeout = setTimeout(() => {
+    setEnrolling(false);
+    setError('Enrollment timed out. Please try again.');
+    toast.error('Enrollment timed out. Please check your connection and try again.');
+  }, 10000); // 10 second timeout
 
     try {
-      console.log('Enrolling user:', user.uid, 'in course:', courseId);
+      console.log('Starting enrollment for user:', user.uid, 'in course:', courseId);
+    
+    // Check if already enrolled with better error handling
       const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', courseId);
       const enrollmentSnap = await getDoc(enrollmentRef);
+      
       if (enrollmentSnap.exists()) {
         console.log('User already enrolled:', user.uid);
+        clearTimeout(enrollmentTimeout);
         setIsEnrolled(true);
         enrollmentChecked.current = true;
         throw new Error('You are already enrolled in this course.');
@@ -245,6 +253,8 @@ export default function CourseEnrollmentPage() {
           });
           groupId = groupRef.id;
 
+          // Create default chat forum
+
           await setDoc(doc(db, 'groups', groupId, 'chatForums', 'default'), {
             id: 'default',
             title: 'General Discussion',
@@ -256,16 +266,19 @@ export default function CourseEnrollmentPage() {
         }
       }
 
-      await runTransaction(db, async (transaction) => {
-        transaction.set(enrollmentRef, {
-          courseId: courseId,
-          userId: user.uid,
-          enrolledAt: new Date(),
-          status: 'active',
-        });
+      const batch = writeBatch(db);
+    
+      // Create enrollment
+      batch.set(enrollmentRef, {
+        courseId: courseId,
+        userId: user.uid,
+        enrolledAt: new Date(),
+        status: 'active',
+      });
 
-        const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
-        transaction.set(progressRef, {
+         // Create progress tracking
+      const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
+        batch.set(progressRef, {
           readModules: {},
           scrollPositions: {},
           lastReadDate: new Date(),
@@ -274,43 +287,52 @@ export default function CourseEnrollmentPage() {
           progress: 0,
         });
 
-        const groupRef = doc(db, 'groups', groupId!);
-        const groupDoc = await getDoc(groupRef);
-        if (groupDoc.exists()) {
-          const groupData = groupDoc.data();
-          const currentMembers = groupData.members || [];
-          const currentMemberIds = groupData.memberIds || [];
-
-          if (!currentMemberIds.includes(user.uid)) {
-            transaction.update(groupRef, {
-              members: arrayUnion({
-                id: user.uid,
-                name: user.displayName || 'Anonymous User',
-                email: user.email || '',
-                role: 'Student',
-                profileImage: user.photoURL || '',
-              }),
-              memberIds: arrayUnion(user.uid),
-            });
-          }
-        } else {
-          throw new Error(`Group not found for ID: ${groupId}`);
+        // Update group membership
+      const groupRef = doc(db, 'groups', groupId);
+      const groupDoc = await getDoc(groupRef);
+      
+      if (groupDoc.exists()) {
+        const groupData = groupDoc.data();
+        const currentMemberIds = groupData.memberIds || [];
+        
+        if (!currentMemberIds.includes(user.uid)) {
+          batch.update(groupRef, {
+            members: arrayUnion({
+              id: user.uid,
+              name: user.displayName || 'Anonymous User',
+              email: user.email || '',
+              role: 'Student',
+              profileImage: user.photoURL || '',
+            }),
+            memberIds: arrayUnion(user.uid),
+          });
         }
+      }
 
-        const courseRef = doc(db, 'courses', courseId);
-        transaction.update(courseRef, {
+        // Update course stats
+      const courseRef = doc(db, 'courses', courseId);
+        batch.update(courseRef, {
           totalStudents: increment(1),
           groupId: groupId,
         });
-      });
 
-      await addDoc(collection(db, 'groups', groupId!, 'chatForums', 'default', 'messages'), {
+      // Commit the batch
+    await batch.commit();
+
+    // Add welcome message
+    try {
+      await addDoc(collection(db, 'groups', groupId, 'chatForums', 'default', 'messages'), {
         senderId: 'system',
         senderName: 'System',
         content: `Welcome ${user.displayName || 'new member'} to the ${course.title} study group!`,
-        timestamp: serverTimestamp(),
+        timestamp: new Date(),
       });
+    } catch (messageError) {
+      console.warn('Failed to add welcome message:', messageError);
+      // Don't fail enrollment if message fails
+    }
 
+      clearTimeout(enrollmentTimeout);
       console.log('Enrollment successful for user:', user.uid);
       setIsEnrolled(true);
       enrollmentChecked.current = true;
@@ -318,10 +340,25 @@ export default function CourseEnrollmentPage() {
       setError(null);
       toast.success('Enrolled successfully! Welcome to the course!');
       router.push(`/courses/${courseId}/learn?enrolled=true`);
+      
     } catch (err: any) {
+      clearTimeout(enrollmentTimeout);
       console.error('Enrollment error:', err);
-      setError(`Failed to enroll: ${err.message || 'Unknown error'}`);
-      toast.error(`Failed to enroll: ${err.message || 'Unknown error'}`);
+      
+      // Handle specific Firebase errors
+      let errorMessage = 'Unknown error occurred';
+      if (err.code === 'permission-denied') {
+        errorMessage = 'You do not have permission to enroll in this course. Please contact support.';
+      } else if (err.code === 'not-found') {
+        errorMessage = 'Course not found. Please try refreshing the page.';
+      } else if (err.code === 'network-error') {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(`Failed to enroll: ${errorMessage}`);
+      toast.error(`Failed to enroll: ${errorMessage}`);
     } finally {
       setEnrolling(false);
     }
@@ -342,7 +379,7 @@ export default function CourseEnrollmentPage() {
 
   if (loading || authLoading || !authResolved) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex justify-center items-center">
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
       </div>
     );
@@ -350,12 +387,12 @@ export default function CourseEnrollmentPage() {
 
   if (error || !course) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
-        <div className="container mx-auto px-4">
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 py-8">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 px-4 py-3 rounded mb-4">
             {error || 'Course not found'}
           </div>
-          <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
+          <Link href="/courses" className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
             <ArrowLeft size={18} className="mr-2" />
             Back to Courses
           </Link>
@@ -365,44 +402,44 @@ export default function CourseEnrollmentPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
       <div className="bg-white dark:bg-gray-800 shadow-sm">
-        <div className="container mx-auto px-4 py-4">
-          <Link href="/courses" className="flex items-center text-blue-600 hover:text-blue-800">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <Link href="/courses" className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
             <ArrowLeft size={18} className="mr-2" />
             Back to Courses
           </Link>
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
           <div className="lg:col-span-2">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden mb-8">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden mb-6 lg:mb-8">
               <div className="relative">
-                <img src={course.thumbnail} alt={course.title} className="w-full h-64 object-cover" />
+                <img src={course.thumbnail} alt={course.title} className="w-full h-48 sm:h-64 object-cover" />
                 {course.preview_video && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <button className="bg-black bg-opacity-50 rounded-full p-4 hover:bg-opacity-70 transition-opacity">
-                      <PlayCircle className="text-white" size={48} />
+                    <button className="bg-black bg-opacity-50 rounded-full p-3 sm:p-4 hover:bg-opacity-70 transition-opacity">
+                      <PlayCircle className="text-white" size={32} />
                     </button>
                   </div>
                 )}
               </div>
-              <div className="p-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-sm text-blue-600 font-medium">{course.category}</span>
+              <div className="p-4 sm:p-6">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-sm font-medium text-blue-600 dark:text-blue-400">{course.category}</span>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    course.level === 'Beginner' ? 'bg-green-100 text-green-800' :
-                    course.level === 'Intermediate' ? 'bg-blue-100 text-blue-800' :
-                    'bg-purple-100 text-purple-800'
+                    course.level === 'Beginner' ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300' :
+                    course.level === 'Intermediate' ? 'bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300' :
+                    'bg-purple-100 dark:bg-purple-900/20 text-purple-800 dark:text-purple-300'
                   }`}>
                     {course.level}
                   </span>
                 </div>
-                <h1 className="text-3xl font-bold text-gray-800 dark:text-white mb-4">{course.title}</h1>
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white mb-4">{course.title}</h1>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">{course.description}</p>
-                <div className="flex items-center gap-6 text-sm text-gray-500 dark:text-gray-400">
+                <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-sm text-gray-500 dark:text-gray-400">
                   <div className="flex items-center gap-1">
                     <Star className="text-yellow-500" size={16} />
                     <span>{course.rating}</span>
@@ -421,16 +458,16 @@ export default function CourseEnrollmentPage() {
             </div>
 
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-              <div className="border-b border-gray-200 dark:border-b-gray-600">
+              <div className="border-b border-gray-200 dark:border-gray-700">
                 <nav className="flex">
                   {['overview', 'curriculum', 'instructor', 'reviews'].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setActiveTab(tab as any)}
-                      className={`px-6 py-4 text-sm font-medium capitalize ${
+                      className={`px-4 sm:px-6 py-3 sm:py-4 text-sm font-medium capitalize ${
                         activeTab === tab
-                          ? 'text-blue-600 border-b-2 border-blue-600'
-                          : 'text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300'
+                          ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
                       }`}
                     >
                       {tab}
@@ -438,13 +475,13 @@ export default function CourseEnrollmentPage() {
                   ))}
                 </nav>
               </div>
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 {activeTab === 'overview' && (
-                  <div className="space-y-8">
+                  <div className="space-y-6 sm:space-y-8">
                     {course.whatYouLearn.length > 0 && (
                       <div>
-                        <h3 className="text-xl font-semibold mb-4">What you'll learn</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">What you'll learn</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {course.whatYouLearn.map((item, index) => (
                             <div key={index} className="flex items-start gap-3">
                               <CheckCircle className="text-green-500 mt-1 flex-shrink-0" size={16} />
@@ -456,7 +493,7 @@ export default function CourseEnrollmentPage() {
                     )}
                     {course.requirements.length > 0 && (
                       <div>
-                        <h3 className="text-xl font-semibold mb-4">Requirements</h3>
+                        <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">Requirements</h3>
                         <ul className="list-disc list-inside space-y-2 text-gray-700 dark:text-gray-300">
                           {course.requirements.map((req, index) => (
                             <li key={index}>{req}</li>
@@ -466,7 +503,7 @@ export default function CourseEnrollmentPage() {
                     )}
                     {course.targetAudience.length > 0 && (
                       <div>
-                        <h3 className="text-xl font-semibold mb-4">Who this course is for</h3>
+                        <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">Who this course is for</h3>
                         <ul className="list-disc list-inside space-y-2 text-gray-700 dark:text-gray-300">
                           {course.targetAudience.map((audience, index) => (
                             <li key={index}>{audience}</li>
@@ -478,13 +515,13 @@ export default function CourseEnrollmentPage() {
                 )}
                 {activeTab === 'curriculum' && (
                   <div>
-                    <h3 className="text-xl font-semibold mb-4">Course Curriculum ({course.modules.length} modules)</h3>
+                    <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">Course Curriculum ({course.modules.length} modules)</h3>
                     <div className="space-y-4">
                       {course.modules.map((module, index) => (
                         <div key={module.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                           <div className="flex items-center gap-3">
                             <span className="text-sm text-gray-500 dark:text-gray-400">{index + 1}.</span>
-                            <BookOpen size={16} className="text-gray-400" />
+                            <BookOpen size={16} className="text-gray-400 dark:text-gray-500" />
                             <span className="font-medium text-gray-800 dark:text-white">{module.title}</span>
                             {module.duration && (
                               <span className="text-sm text-gray-500 dark:text-gray-400 ml-auto">{module.duration}</span>
@@ -501,21 +538,21 @@ export default function CourseEnrollmentPage() {
                       <img
                         src={course.instructor_image || '/api/placeholder/80/80?text=Instructor'}
                         alt={course.instructor}
-                        className="w-20 h-20 rounded-full object-cover"
+                        className="w-16 sm:w-20 h-16 sm:h-20 rounded-full object-cover"
                       />
                       <div>
-                        <h3 className="text-xl font-semibold text-gray-800 dark:text-white">{course.instructor}</h3>
+                        <h3 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-white">{course.instructor}</h3>
                         <p className="text-gray-600 dark:text-gray-300 text-sm">Course Instructor</p>
                       </div>
                     </div>
                     {course.instructor_bio && (
-                      <div className="prose dark:prose-invert max-w-none">{parse(course.instructor_bio)}</div>
+                      <div className="prose dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">{parse(course.instructor_bio)}</div>
                     )}
                   </div>
                 )}
                 {activeTab === 'reviews' && (
                   <div>
-                    <h3 className="text-xl font-semibold mb-4">Student Reviews</h3>
+                    <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">Student Reviews</h3>
                     <div className="text-center py-8">
                       <p className="text-gray-500 dark:text-gray-400">Reviews will be available after enrollment</p>
                     </div>
@@ -526,25 +563,25 @@ export default function CourseEnrollmentPage() {
           </div>
 
           <div className="lg:col-span-1">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 sticky top-8">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 sm:p-6 sticky top-8">
               <div className="mb-6">
                 <div className="flex items-center gap-3 mb-2">
                   {course.originalPrice && course.originalPrice > course.price && (
-                    <span className="text-2xl font-bold text-gray-400 line-through">${course.originalPrice}</span>
+                    <span className="text-xl sm:text-2xl font-bold text-gray-400 dark:text-gray-500 line-through">${course.originalPrice}</span>
                   )}
-                  <span className="text-3xl font-bold text-gray-800 dark:text-white">
+                  <span className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">
                     {course.price === 0 ? 'Free' : `$${course.price}`}
                   </span>
                 </div>
                 {course.originalPrice && course.originalPrice > course.price && (
-                  <span className="text-sm text-red-600 font-medium">
+                  <span className="text-sm text-red-600 dark:text-red-400 font-medium">
                     {Math.round((1 - course.price / course.originalPrice) * 100)}% off
                   </span>
                 )}
               </div>
               {isEnrolled ? (
                 <Link href={`/courses/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
-                  <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4">
+                  <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 sm:py-3 px-4 rounded-lg transition-colors mb-4">
                     Resume Course
                   </button>
                 </Link>
@@ -552,13 +589,13 @@ export default function CourseEnrollmentPage() {
                 <button
                   onClick={() => setShowEnrollmentModal(true)}
                   disabled={enrolling || authLoading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 sm:py-3 px-4 rounded-lg transition-colors mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {enrolling ? 'Enrolling...' : authLoading ? 'Loading...' : 'Enroll Now'}
                 </button>
               )}
               {error && (
-                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mt-4">
+                <div className="bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 px-4 py-3 rounded mt-4">
                   {error.includes('Invalid') || error.includes('not found') ? error : `Enrollment failed: ${error}`}
                 </div>
               )}
@@ -567,28 +604,28 @@ export default function CourseEnrollmentPage() {
                 <h4 className="font-semibold text-gray-800 dark:text-white">This course includes:</h4>
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
-                    <Clock size={16} className="text-gray-400" />
+                    <Clock size={16} className="text-gray-400 dark:text-gray-500" />
                     <span className="text-sm text-gray-600 dark:text-gray-300">{calculateTotalDuration()} on-demand video</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <BookOpen size={16} className="text-gray-400" />
+                    <BookOpen size={16} className="text-gray-400 dark:text-gray-500" />
                     <span className="text-sm text-gray-600 dark:text-gray-300">{course.modules.length} modules</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Download size={16} className="text-gray-400" />
+                    <Download size={16} className="text-gray-400 dark:text-gray-500" />
                     <span className="text-sm text-gray-600 dark:text-gray-300">Downloadable resources</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Globe size={16} className="text-gray-400" />
+                    <Globe size={16} className="text-gray-400 dark:text-gray-500" />
                     <span className="text-sm text-gray-600 dark:text-gray-300">Full lifetime access</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Shield size={16} className="text-gray-400" />
+                    <Shield size={16} className="text-gray-400 dark:text-gray-500" />
                     <span className="text-sm text-gray-600 dark:text-gray-300">Access on mobile and TV</span>
                   </div>
                   {course.certificate && (
                     <div className="flex items-center gap-3">
-                      <Award size={16} className="text-gray-400" />
+                      <Award size={16} className="text-gray-400 dark:text-gray-500" />
                       <span className="text-sm text-gray-600 dark:text-gray-300">Certificate of completion</span>
                     </div>
                   )}
@@ -600,11 +637,11 @@ export default function CourseEnrollmentPage() {
       </div>
 
       {showEnrollmentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 sm:p-6 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 sm:p-6 w-full max-w-md sm:max-w-lg">
             {enrollmentSuccess ? (
               <>
-                <h3 className="text-xl font-semibold mb-4 text-green-600">Enrollment Successful!</h3>
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 text-green-600 dark:text-green-400">Enrollment Successful!</h3>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
                   You have successfully enrolled in <strong>{course.title}</strong>. You can now start learning and access all course materials!
                 </p>
@@ -617,10 +654,10 @@ export default function CourseEnrollmentPage() {
                     <li>• Earn your completion certificate</li>
                   </ul>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={() => setShowEnrollmentModal(false)}
-                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg transition-colors"
+                    className="flex-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 py-2 px-4 rounded-lg transition-colors"
                   >
                     Close
                   </button>
@@ -633,13 +670,13 @@ export default function CourseEnrollmentPage() {
               </>
             ) : (
               <>
-                <h3 className="text-xl font-semibold mb-4">Confirm Enrollment</h3>
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">Confirm Enrollment</h3>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
                   You are about to enroll in <strong>{course.title}</strong>.
                   {course.price > 0 && ` This will charge $${course.price} to your account.`}
                 </p>
                 {error && (
-                  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                  <div className="bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 px-4 py-3 rounded mb-4">
                     {error}
                   </div>
                 )}
@@ -652,17 +689,17 @@ export default function CourseEnrollmentPage() {
                     <li>• 30-day money-back guarantee</li>
                   </ul>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={() => setShowEnrollmentModal(false)}
-                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg transition-colors"
+                    className="flex-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 py-2 px-4 rounded-lg transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleEnrollment}
                     disabled={enrolling}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50"
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {enrolling ? 'Processing...' : 'Confirm Enrollment'}
                   </button>

@@ -5,12 +5,11 @@ import Head from 'next/head';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { auth, googleProvider, db } from '@/lib/firebase';
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
+import { auth, googleProvider } from '@/lib/firebase';
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
 import { createUserDocument } from '@/utils/userUtils';
 
 export const dynamic = 'force-dynamic'
-
 
 interface CarouselImage {
   src: string;
@@ -45,7 +44,16 @@ const LoginPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [carouselImages.length]);
 
-  // This function is now imported from utils/userUtils
+  // Check if user is already logged in
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user && user.emailVerified) {
+        router.push("/home");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,9 +62,12 @@ const LoginPage: React.FC = () => {
     
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Check email verification
       if (!userCredential.user.emailVerified) {
         setError("Please verify your email before logging in");
         await auth.signOut();
+        setLoading(false);
         return;
       }
       
@@ -64,21 +75,35 @@ const LoginPage: React.FC = () => {
       await createUserDocument(userCredential.user);
       
       console.log('Successfully logged in with email');
-      router.push("/home");
+      
+      // Router push will be handled by the useEffect above
+      
     } catch (error: any) {
       console.error('Email login error:', error);
-      if (error.code === 'auth/user-not-found') {
-        setError('No account found with this email address');
-      } else if (error.code === 'auth/wrong-password') {
-        setError('Incorrect password');
-      } else if (error.code === 'auth/invalid-email') {
-        setError('Invalid email address');
-      } else if (error.code === 'auth/too-many-requests') {
-        setError('Too many failed attempts. Please try again later');
-      } else {
-        setError(error.message || 'An error occurred during login');
+      let errorMessage = 'An error occurred during login';
+      
+      switch (error.code) {
+        case 'auth/user-not-found':
+          errorMessage = 'No account found with this email address';
+          break;
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          errorMessage = 'Incorrect email or password';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address';
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = 'Too many failed attempts. Please try again later';
+          break;
+        case 'auth/user-disabled':
+          errorMessage = 'This account has been disabled';
+          break;
+        default:
+          errorMessage = error.message || errorMessage;
       }
-    } finally {
+      
+      setError(errorMessage);
       setLoading(false);
     }
   };
@@ -88,20 +113,16 @@ const LoginPage: React.FC = () => {
     setError(null);
     
     try {
-      // Configure Google provider to request proper scopes for profile data
+      // Configure Google provider
       const provider = new GoogleAuthProvider();
       provider.addScope('profile');
       provider.addScope('email');
-      
-      // Force account selection even when already logged in
       provider.setCustomParameters({
         prompt: 'select_account'
       });
       
       // Sign in with popup
       const result = await signInWithPopup(auth, provider);
-      
-      // Get the profile info from Google Sign In
       const user = result.user;
       
       // Create user document in Firestore
@@ -110,20 +131,30 @@ const LoginPage: React.FC = () => {
       console.log('Successfully logged in with Google');
       console.log('Profile image URL:', user.photoURL);
       
-      // Redirect to dashboard
-      router.push("/home");
+      // Router push will be handled by the useEffect above
+      
     } catch (error: any) {
       console.error('Google login error:', error);
-      if (error.code === 'auth/popup-closed-by-user') {
-        setError("Sign-in canceled. Please try again.");
-      } else if (error.code === 'auth/popup-blocked') {
-        setError("Popup blocked. Please allow popups and try again.");
-      } else if (error.code === 'auth/network-request-failed') {
-        setError("Network error. Please check your connection and try again.");
-      } else {
-        setError(error.message || 'An error occurred during Google sign-in');
+      let errorMessage = 'An error occurred during Google sign-in';
+      
+      switch (error.code) {
+        case 'auth/popup-closed-by-user':
+          errorMessage = "Sign-in canceled. Please try again.";
+          break;
+        case 'auth/popup-blocked':
+          errorMessage = "Popup blocked. Please allow popups and try again.";
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = "Network error. Please check your connection and try again.";
+          break;
+        case 'auth/cancelled-popup-request':
+          errorMessage = "Another popup is already open.";
+          break;
+        default:
+          errorMessage = error.message || errorMessage;
       }
-    } finally {
+      
+      setError(errorMessage);
       setLoading(false);
     }
   };
@@ -253,11 +284,11 @@ const LoginPage: React.FC = () => {
                     disabled={loading}
                   >
                     {showPassword ? (
-                      <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                       </svg>
                     ) : (
-                      <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <svg className="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
@@ -295,7 +326,7 @@ const LoginPage: React.FC = () => {
                   <div className="w-full border-t border-gray-300"></div>
                 </div>
                 <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                  <span className="px-2 bg-gray-50 dark:bg-gray-900 text-gray-500">Or continue with</span>
                 </div>
               </div>
 

@@ -3,8 +3,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Users, MessageCircle, FileText, Search, Send } from 'lucide-react';
 import debounce from 'lodash/debounce';
-
-// Import all modular components and hooks
 import { useAuth } from '@/hooks/useAuth';
 import { useGroups } from '@/hooks/useGroups';
 import { useMessages } from '@/hooks/useMessages';
@@ -15,28 +13,25 @@ import { MessageItem } from '@/components/course-groups/MessageItem';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { CourseGroup } from '@/types';
+import { useTheme } from '@/context/ThemeContext';
 
 const CourseGroupManagementPage: React.FC = () => {
-  // State management
+  const { isDark } = useTheme();
   const [selectedGroup, setSelectedGroup] = useState<CourseGroup | null>(null);
   const [activeTab, setActiveTab] = useState<'members' | 'chat' | 'assignments'>('members');
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
-
-  // Custom hooks
   const { user, loading: authLoading } = useAuth();
   const { groups, loading: groupsLoading, error: groupsError } = useGroups(user);
   const { messages, messagesEndRef } = useMessages(selectedGroup, user);
 
-  // Set selected group when groups load
   React.useEffect(() => {
     if (groups.length > 0 && !selectedGroup) {
       setSelectedGroup(groups[0]);
     }
   }, [groups, selectedGroup]);
 
-  // Debounced search
   const handleSearch = useCallback(
     debounce((term: string) => {
       setSearchTerm(term);
@@ -44,7 +39,6 @@ const CourseGroupManagementPage: React.FC = () => {
     []
   );
 
-  // Filtered members
   const filteredMembers = useMemo(() => {
     if (!selectedGroup) return [];
     return selectedGroup.members.filter(
@@ -55,7 +49,6 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   }, [selectedGroup, searchTerm]);
 
-  // Event handlers
   const handleEditMemberRole = async (
     groupId: string,
     memberId: string,
@@ -63,24 +56,20 @@ const CourseGroupManagementPage: React.FC = () => {
   ) => {
     const currentGroup = groups.find((g) => g.id === groupId);
     if (!currentGroup) return;
-    
     await GroupService.editMemberRole(groupId, memberId, newRole, currentGroup.members);
   };
 
   const handleRemoveMember = async (groupId: string, memberId: string) => {
     const currentGroup = groups.find((g) => g.id === groupId);
     if (!currentGroup) return;
-    
     await GroupService.removeMember(groupId, memberId, currentGroup.members);
   };
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedGroup || !user || sendingMessage) return;
-
     const messageContent = newMessage.trim();
     setNewMessage('');
     setSendingMessage(true);
-
     try {
       await GroupService.sendMessage(
         selectedGroup.id,
@@ -90,27 +79,25 @@ const CourseGroupManagementPage: React.FC = () => {
         selectedGroup.members
       );
     } catch (error) {
-      setNewMessage(messageContent); // Revert message if failed
+      setNewMessage(messageContent);
     } finally {
       setSendingMessage(false);
     }
   };
 
-  // Render methods (moved to separate functions for clarity)
   const renderMembersList = () => {
     if (!selectedGroup) return null;
-
     return (
       <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-xl font-semibold flex items-center text-gray-800 dark:text-white">
+        <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-lg sm:text-xl font-semibold flex items-center text-gray-800 dark:text-white">
             <Users className="mr-2 text-blue-600 dark:text-blue-400" /> Members
             <span className="ml-2 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 rounded-full text-sm">
               {selectedGroup.members.length}
             </span>
           </h3>
         </div>
-        <div className="p-4">
+        <div className="p-4 sm:p-6">
           <div className="flex mb-4">
             <div className="relative flex-grow">
               <input
@@ -146,18 +133,17 @@ const CourseGroupManagementPage: React.FC = () => {
 
   const renderChat = () => {
     if (!selectedGroup) return null;
-
     return (
       <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg h-[calc(100vh-200px)] flex flex-col">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-xl font-semibold flex items-center text-gray-800 dark:text-white">
+        <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-lg sm:text-xl font-semibold flex items-center text-gray-800 dark:text-white">
             <MessageCircle className="mr-2 text-blue-600 dark:text-blue-400" /> Group Chat
             <span className="ml-2 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded-full text-sm">
               {selectedGroup.members.length} members
             </span>
           </h3>
         </div>
-        <div className="flex-1 p-4 overflow-y-auto">
+        <div className="flex-1 p-4 sm:p-6 overflow-y-auto">
           {messages.length > 0 ? (
             messages.map((message) => {
               const sender = selectedGroup.members.find((m) => m.id === message.senderId);
@@ -178,7 +164,7 @@ const CourseGroupManagementPage: React.FC = () => {
           )}
           <div ref={messagesEndRef} />
         </div>
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-blue-50 dark:bg-blue-900">
+        <div className="p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 bg-blue-50 dark:bg-blue-900">
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -191,7 +177,7 @@ const CourseGroupManagementPage: React.FC = () => {
             />
             <button
               onClick={handleSendMessage}
-              className="btn-primary p-2 disabled:opacity-50"
+              className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg disabled:opacity-50"
               disabled={!newMessage.trim() || sendingMessage}
             >
               {sendingMessage ? (
@@ -208,18 +194,17 @@ const CourseGroupManagementPage: React.FC = () => {
 
   const renderAssignments = () => {
     if (!selectedGroup) return null;
-
     return (
       <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-xl font-semibold flex items-center text-gray-800 dark:text-white">
+        <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 className="text-lg sm:text-xl font-semibold flex items-center text-gray-800 dark:text-white">
             <FileText className="mr-2 text-blue-600 dark:text-blue-400" /> Assignments
             <span className="ml-2 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded-full text-sm">
               {selectedGroup.assignments.length}
             </span>
           </h3>
         </div>
-        <div className="p-4 space-y-4">
+        <div className="p-4 sm:p-6 space-y-4">
           {selectedGroup.assignments.length > 0 ? (
             selectedGroup.assignments.map((assignment) => (
               <div
@@ -227,7 +212,7 @@ const CourseGroupManagementPage: React.FC = () => {
                 className="border rounded-lg p-4 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition flex justify-between items-center"
               >
                 <div>
-                  <h4 className="font-semibold text-lg text-gray-800 dark:text-white">{assignment.title}</h4>
+                  <h4 className="font-semibold text-base sm:text-lg text-gray-800 dark:text-white">{assignment.title}</h4>
                   <div
                     className={`
                       text-xs px-2 py-1 rounded-full inline-block mt-2
@@ -258,23 +243,17 @@ const CourseGroupManagementPage: React.FC = () => {
     );
   };
 
-  // Loading states
   if (authLoading || groupsLoading) {
     return <LoadingSpinner />;
   }
 
-  // Error handling
-  const error = groupsError;
-
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
-      {error && <ErrorMessage message={error} />}
-      
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Groups List */}
+      {groupsError && <ErrorMessage message={groupsError} />}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <div className="bg-white dark:bg-gray-800 shadow-md rounded-lg flex flex-col">
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Course Groups</h2>
+          <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-white">Course Groups</h2>
           </div>
           <div className="divide-y overflow-y-auto flex-grow">
             {groups.length > 0 ? (
@@ -287,18 +266,15 @@ const CourseGroupManagementPage: React.FC = () => {
                 />
               ))
             ) : (
-              <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+              <div className="p-4 sm:p-6 text-center text-gray-500 dark:text-gray-400">
                 No groups available. Enroll in a course to join a group.
               </div>
             )}
           </div>
         </div>
-
-        {/* Main Content Area */}
         <div className="col-span-2">
           {selectedGroup ? (
             <>
-              {/* Tab Navigation */}
               <div className="flex flex-col sm:flex-row mb-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
                 {[
                   { key: 'members', label: 'Members', icon: Users },
@@ -322,15 +298,13 @@ const CourseGroupManagementPage: React.FC = () => {
                   </button>
                 ))}
               </div>
-
-              {/* Tab Content */}
               {activeTab === 'members' && renderMembersList()}
               {activeTab === 'chat' && renderChat()}
               {activeTab === 'assignments' && renderAssignments()}
             </>
           ) : (
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md text-center">
-              <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-white">
+            <div className="bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-lg shadow-md text-center">
+              <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">
                 Welcome to Course Group Management
               </h3>
               <p className="text-gray-600 dark:text-gray-400">Select a group to manage its details.</p>
@@ -338,21 +312,6 @@ const CourseGroupManagementPage: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* Styles */}
-      <style jsx>{`
-        .btn-primary {
-          background: linear-gradient(to right, #3b82f6, #2563eb);
-          color: white;
-          border-radius: 0.5rem;
-          padding: 0.5rem 1rem;
-          transition: all 0.2s ease;
-        }
-        .btn-primary:hover {
-          background: linear-gradient(to right, #2563eb, #1d4ed8);
-          transform: translateY(-1px);
-        }
-      `}</style>
     </div>
   );
 };

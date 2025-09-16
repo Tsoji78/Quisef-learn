@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/lib/firebase';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Course {
   id: string;
@@ -19,6 +20,7 @@ interface Course {
 }
 
 export default function CoursesPage() {
+  const { isDark } = useTheme();
   const [courses, setCourses] = useState<Course[]>([]);
   const [enrollmentStatus, setEnrollmentStatus] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState('All');
@@ -29,11 +31,9 @@ export default function CoursesPage() {
   const coursesPerPage = 6;
   const enrollmentCache = useRef<Record<string, boolean>>({});
 
-  // Authentication check
   useEffect(() => {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      console.log('Auth state changed, user:', currentUser?.uid);
       setUser(currentUser);
       if (currentUser) {
         checkEnrollmentStatus(currentUser.uid);
@@ -45,19 +45,16 @@ export default function CoursesPage() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch courses from Firestore
   useEffect(() => {
     const fetchCourses = async () => {
       setLoading(true);
       try {
-        console.log('Fetching courses from Firestore');
         const coursesCollection = collection(db, 'courses');
         const coursesSnapshot = await getDocs(coursesCollection);
         const coursesList: Course[] = await Promise.all(
           coursesSnapshot.docs.map(async (doc) => {
             const data = doc.data();
             let groupId: string | undefined = undefined;
-
             try {
               const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', doc.id));
               const groupsSnapshot = await getDocs(groupsQuery);
@@ -67,7 +64,6 @@ export default function CoursesPage() {
             } catch (groupError) {
               console.warn('Error fetching group info for course:', doc.id, groupError);
             }
-
             return {
               id: doc.id,
               title: data.title || 'Untitled Course',
@@ -83,29 +79,23 @@ export default function CoursesPage() {
             };
           })
         );
-        console.log('Fetched courses:', coursesList.length);
         setCourses(coursesList);
         setError(null);
-
         if (user) {
           checkEnrollmentStatus(user.uid);
         }
       } catch (err: any) {
-        console.error('Error fetching courses:', err);
         setError(`Failed to load courses: ${err.message || 'Unknown error'}`);
       } finally {
         setLoading(false);
       }
     };
-
     fetchCourses();
   }, [user]);
 
-  // Check enrollment status with batch query
   const checkEnrollmentStatus = async (userId: string) => {
     if (!userId) return;
     try {
-      console.log('Checking enrollment status for user:', userId);
       const enrollmentsQuery = query(collection(db, 'users', userId, 'enrollments'));
       const enrollmentsSnapshot = await getDocs(enrollmentsQuery);
       const status: Record<string, boolean> = {};
@@ -114,21 +104,17 @@ export default function CoursesPage() {
       });
       enrollmentCache.current = status;
       setEnrollmentStatus(status);
-      console.log('Enrollment status:', status);
     } catch (err) {
       console.error('Error checking enrollment status:', err);
     }
   };
 
-  // Refresh enrollment status on navigation or enrollment
   useEffect(() => {
     if (user && window.location.search.includes('enrolled=true')) {
-      console.log('Detected recent enrollment, refreshing status');
       checkEnrollmentStatus(user.uid);
     }
   }, [user]);
 
-  // Filter and paginate courses
   const filteredCourses = filter === 'All' ? courses : courses.filter((course) => course.category === filter);
   const totalPages = Math.ceil(filteredCourses.length / coursesPerPage);
   const currentCourses = filteredCourses.slice(
@@ -164,11 +150,11 @@ export default function CoursesPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 dark:text-white">
+      <div className="flex flex-col sm:flex-row justify-between items-center mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">
           {user ? 'My Courses' : 'Available Courses'}
         </h1>
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap gap-2 justify-end mt-4 sm:mt-0">
           {categories.map((category) => (
             <button
               key={category}
@@ -176,11 +162,11 @@ export default function CoursesPage() {
                 setFilter(category);
                 setCurrentPage(1);
               }}
-              className={`px-4 py-2 rounded-full transition-colors duration-200 ${
-                filter === category
+              className={`px-4 py-2 rounded-full transition-colors duration-200 text-sm sm:text-base
+                ${filter === category
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               {category}
             </button>
@@ -209,7 +195,7 @@ export default function CoursesPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {currentCourses.map((course) => (
           <div key={course.id} className="group">
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl transform hover:-translate-y-2 hover:scale-105">
@@ -219,9 +205,9 @@ export default function CoursesPage() {
                   {course.level}
                 </div>
               </div>
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 <Link href={`/courses/${course.id}`}>
-                  <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2 hover:underline">
+                  <h2 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-white mb-2 hover:underline">
                     {course.title}
                   </h2>
                 </Link>
@@ -229,7 +215,6 @@ export default function CoursesPage() {
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.instructor}</span>
                   <span className="text-sm text-gray-500 dark:text-gray-400">{course.duration}</span>
                 </div>
-
                 {course.groupId && (
                   <div className="mt-2">
                     <Link href={`/groups?groupId=${course.groupId}`} className="text-blue-600 hover:underline text-sm">
@@ -237,7 +222,6 @@ export default function CoursesPage() {
                     </Link>
                   </div>
                 )}
-
                 <div className="mt-4">
                   {user ? (
                     enrollmentStatus[course.id] ? (
@@ -288,7 +272,7 @@ export default function CoursesPage() {
 
       {!loading && currentCourses.length === 0 && (
         <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          <p className="text-xl">No courses found in this category.</p>
+          <p className="text-lg sm:text-xl">No courses found in this category.</p>
         </div>
       )}
 
@@ -297,11 +281,11 @@ export default function CoursesPage() {
           <button
             onClick={() => paginate(currentPage - 1)}
             disabled={currentPage === 1}
-            className={`px-4 py-2 rounded-lg ${
-              currentPage === 1
+            className={`px-4 py-2 rounded-lg text-sm sm:text-base
+              ${currentPage === 1
                 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+              }`}
           >
             Previous
           </button>
@@ -309,11 +293,11 @@ export default function CoursesPage() {
             <button
               key={number}
               onClick={() => paginate(number)}
-              className={`px-4 py-2 rounded-lg ${
-                currentPage === number
+              className={`px-4 py-2 rounded-lg text-sm sm:text-base
+                ${currentPage === number
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-              }`}
+                }`}
             >
               {number}
             </button>
@@ -321,11 +305,11 @@ export default function CoursesPage() {
           <button
             onClick={() => paginate(currentPage + 1)}
             disabled={currentPage === totalPages}
-            className={`px-4 py-2 rounded-lg ${
-              currentPage === totalPages
+            className={`px-4 py-2 rounded-lg text-sm sm:text-base
+              ${currentPage === totalPages
                 ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+              }`}
           >
             Next
           </button>
