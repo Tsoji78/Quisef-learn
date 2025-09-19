@@ -3,7 +3,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Users, MessageCircle, FileText, Search, Send } from 'lucide-react';
 import debounce from 'lodash/debounce';
-import { useAuth } from '@/hooks/useAuth';
 import { useGroups } from '@/hooks/useGroups';
 import { useMessages } from '@/hooks/useMessages';
 import { GroupService } from '@/services/groupService';
@@ -14,6 +13,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { CourseGroup } from '@/types';
 import { useTheme } from '@/context/ThemeContext';
+import { useAuth } from '@/context/AuthContext';
 
 const CourseGroupManagementPage: React.FC = () => {
   const { isDark } = useTheme();

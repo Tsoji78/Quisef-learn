@@ -1,107 +1,131 @@
-// utils/userUtils.tsx
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+// utils/userUtils.ts
 import { User } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-// Define the user data interface for Firestore
-export interface UserData {
+export interface UserProfile {
   uid: string;
-  displayName: string;
   email: string;
-  photoURL: string;
-  role: 'user' | 'instructor' | 'admin';
-  createdAt: any; // Firestore serverTimestamp
-  updatedAt: any; // Firestore serverTimestamp
+  displayName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  photoURL: string | null;
+  emailVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-// Type for additional data that can be passed
-export interface AdditionalUserData {
-  role?: 'user' | 'instructor' | 'admin';
-  [key: string]: any;
-}
+export const createUserDocument = async (user: User, additionalData?: any) => {
+  if (!user) return;
 
-export const createUserDocument = async (
-  user: User | null,
-  additionalData: AdditionalUserData = {}
-): Promise<void> => {
-  if (!user) {
-    console.warn('No user provided to createUserDocument');
-    return;
-  }
-  
   const userRef = doc(db, 'users', user.uid);
-  
-  try {
-    const userSnap = await getDoc(userRef);
+  const snapshot = await getDoc(userRef);
+
+  if (!snapshot.exists()) {
+    // Parse display name into first and last name
+    let firstName = '';
+    let lastName = '';
     
-    if (!userSnap.exists()) {
-      // Create new user document
-      const { displayName, email, photoURL, uid } = user;
-      const userData: Partial<UserData> = {
-        uid,
-        displayName: displayName || '',
-        email: email || '',
-        photoURL: photoURL || '',
-        role: additionalData.role || 'user', // Default role
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ...additionalData,
-      };
-      
+    if (user.displayName) {
+      const nameParts = user.displayName.trim().split(' ');
+      firstName = nameParts[0] || '';
+      lastName = nameParts.slice(1).join(' ') || '';
+    }
+
+    const userData: UserProfile = {
+      uid: user.uid,
+      email: user.email || '',
+      displayName: user.displayName,
+      firstName: firstName || additionalData?.firstName || '',
+      lastName: lastName || additionalData?.lastName || '',
+      photoURL: user.photoURL,
+      emailVerified: user.emailVerified,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...additionalData
+    };
+
+    try {
       await setDoc(userRef, userData);
-      console.log('User document created successfully for:', uid);
-    } else {
-      // Update existing user document
-      const updateData = {
-        updatedAt: serverTimestamp(),
-        // Update photoURL if it changed (common with Google sign-in)
-        ...(user.photoURL && { photoURL: user.photoURL }),
-        // Update displayName if it changed
-        ...(user.displayName && { displayName: user.displayName }),
-        ...additionalData,
-      };
-      
-      await setDoc(userRef, updateData, { merge: true });
-      console.log('User document updated successfully for:', user.uid);
+      console.log('User document created successfully');
+    } catch (error) {
+      console.error('Error creating user document:', error);
     }
-  } catch (error) {
-    console.error('Error creating/updating user document:', error);
-    throw new Error(`Failed to create user document: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  } else {
+    // Update existing user document with any new information
+    const existingData = snapshot.data();
+    
+    // Only update if we have new information
+    const updates: any = {
+      updatedAt: new Date()
+    };
+
+    // Update photo URL if it's new
+    if (user.photoURL && user.photoURL !== existingData.photoURL) {
+      updates.photoURL = user.photoURL;
+    }
+
+    // Update display name and parse it if it's new
+    if (user.displayName && user.displayName !== existingData.displayName) {
+      updates.displayName = user.displayName;
+      
+      const nameParts = user.displayName.trim().split(' ');
+      updates.firstName = nameParts[0] || existingData.firstName || '';
+      updates.lastName = nameParts.slice(1).join(' ') || existingData.lastName || '';
+    }
+
+    // Update email verification status
+    if (user.emailVerified !== existingData.emailVerified) {
+      updates.emailVerified = user.emailVerified;
+    }
+
+    // Add any additional data
+    if (additionalData) {
+      Object.assign(updates, additionalData);
+    }
+
+    // Only update if there are actual changes
+    if (Object.keys(updates).length > 1) { // More than just updatedAt
+      try {
+        await setDoc(userRef, updates, { merge: true });
+        console.log('User document updated successfully');
+      } catch (error) {
+        console.error('Error updating user document:', error);
+      }
+    }
   }
 };
 
-// Helper function to get user data from Firestore
-export const getUserDocument = async (uid: string): Promise<UserData | null> => {
-  if (!uid) return null;
+export const updateUserProfile = async (uid: string, updates: Partial<UserProfile>) => {
+  if (!uid) return;
+
+  const userRef = doc(db, 'users', uid);
   
   try {
-    const userRef = doc(db, 'users', uid);
-    const userSnap = await getDoc(userRef);
-    
-    if (userSnap.exists()) {
-      return userSnap.data() as UserData;
-    }
-    return null;
+    await setDoc(userRef, {
+      ...updates,
+      updatedAt: new Date()
+    }, { merge: true });
+    console.log('User profile updated successfully');
   } catch (error) {
-    console.error('Error fetching user document:', error);
-    return null;
+    console.error('Error updating user profile:', error);
+    throw error;
   }
 };
 
-// Helper function to update user role (admin only)
-export const updateUserRole = async (
-  uid: string,
-  newRole: 'user' | 'instructor' | 'admin'
-): Promise<void> => {
+export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  if (!uid) return null;
+
+  const userRef = doc(db, 'users', uid);
+  
   try {
-    const userRef = doc(db, 'users', uid);
-    await setDoc(userRef, {
-      role: newRole,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    console.log(`User role updated to ${newRole} for:`, uid);
+    const snapshot = await getDoc(userRef);
+    if (snapshot.exists()) {
+      return snapshot.data() as UserProfile;
+    }
+    return null;
   } catch (error) {
-    console.error('Error updating user role:', error);
-    throw new Error(`Failed to update user role: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.error('Error getting user profile:', error);
+    return null;
   }
 };

@@ -1,11 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Toaster } from 'react-hot-toast';
-import { useAuth } from '@/hooks/useAuth'; // If needed for provider
 import { ThemeProvider } from '@/context/ThemeContext';
-
-
-
+import { AuthProvider } from '@/context/AuthContext';
 
 export const metadata: Metadata = {
   title: ' Dashboard',
@@ -23,10 +20,12 @@ export default function RootLayout({
         
       </head>
       <body>
-        <ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
             <Toaster />
             {children}
-        </ThemeProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

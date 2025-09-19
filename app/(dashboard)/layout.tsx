@@ -1,15 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Image from 'next/image';
+import SafeImage from '@/components/SafeImage';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/context/AuthContext';
 import { HiMenuAlt3 } from 'react-icons/hi';
 import { FiUser, FiSettings, FiLogOut } from 'react-icons/fi';
 import { useTheme } from '@/context/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
-
-const defaultImage = '/image/flat.jpg';
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -44,9 +42,52 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     return () => document.removeEventListener('click', handleOutsideClick);
   }, [menuOpen]);
 
+  // Function to get user's display name with priority order
+  const getDisplayName = () => {
+    if (userProfile?.firstName || userProfile?.lastName) {
+      // Prioritize first name + last name
+      const firstName = userProfile.firstName || '';
+      const lastName = userProfile.lastName || '';
+      return `${firstName} ${lastName}`.trim();
+    }
+    
+    // Fallback to displayName
+    if (userProfile?.displayName) {
+      return userProfile.displayName;
+    }
+    
+    // Last fallback to email or 'User'
+    return userProfile?.email ? userProfile.email.split('@')[0] : 'User';
+  };
+
+  // Function to get user's initials for avatar
+  const getUserInitials = () => {
+    if (userProfile?.firstName || userProfile?.lastName) {
+      const firstInitial = userProfile.firstName ? userProfile.firstName[0].toUpperCase() : '';
+      const lastInitial = userProfile.lastName ? userProfile.lastName[0].toUpperCase() : '';
+      return `${firstInitial}${lastInitial}`.trim() || 'U';
+    }
+    
+    if (userProfile?.displayName) {
+      const nameParts = userProfile.displayName.trim().split(' ');
+      const firstInitial = nameParts[0] ? nameParts[0][0].toUpperCase() : '';
+      const lastInitial = nameParts[1] ? nameParts[1][0].toUpperCase() : '';
+      return `${firstInitial}${lastInitial}`.trim() || firstInitial || 'U';
+    }
+    
+    if (userProfile?.email) {
+      return userProfile.email[0].toUpperCase();
+    }
+    
+    return 'U';
+  };
+
   if (!mounted) {
     return <div className="min-h-screen" style={{ visibility: 'hidden' }}></div>;
   }
+
+  const displayName = getDisplayName();
+  const userInitials = getUserInitials();
 
   return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-300 flex overflow-hidden">
@@ -69,36 +110,45 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                 </div>
                 <div className="flex items-center gap-4">
                   <ThemeToggle isDarkMode={isDark} onToggle={toggleTheme} />
+                  
+                  {/* User greeting - show first name if available */}
+                  <div className="hidden md:flex flex-col items-end">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      Welcome back,
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {userProfile?.firstName || displayName}
+                    </span>
+                  </div>
+                  
                   <div className="relative user-menu-container">
                     <button
                       onClick={() => setMenuOpen(!menuOpen)}
                       className="flex text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800"
                       aria-label="Open user menu"
                     >
-                      {userProfile?.photoURL ? (
-                        <div className="h-8 w-8 relative overflow-hidden rounded-full border-2 border-gray-200 dark:border-gray-600">
-                          <Image
-                            src={userProfile.photoURL || defaultImage}
-                            alt={userProfile.displayName || 'User profile'}
-                            fill
-                            className="object-cover"
-                          />
-                        </div>
-                      ) : (
-                        <div className="h-8 w-8 rounded-full bg-indigo-600 dark:bg-indigo-500 flex items-center justify-center text-white dark:text-gray-100">
-                          {userProfile?.displayName
-                            ? userProfile.displayName[0].toUpperCase()
-                            : userProfile?.email
-                            ? userProfile.email[0].toUpperCase()
-                            : 'U'}
-                        </div>
-                      )}
+                      <div className="h-8 w-8 relative overflow-hidden rounded-full border-2 border-gray-200 dark:border-gray-600">
+                        <SafeImage
+                          src={userProfile?.photoURL || ''}
+                          alt={`${displayName}'s profile photo`}
+                          width={32}
+                          height={32}
+                          className="rounded-full cursor-pointer"
+                          fallbackInitials={userInitials}
+                          onClick={() => setMenuOpen(!menuOpen)}
+                        />
+                      </div>
                     </button>
                     {menuOpen && (
-                      <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg py-1 bg-white dark:bg-gray-800 ring-1 ring-black dark:ring-gray-600 ring-opacity-5 z-50">
-                        <div className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
-                          <p className="font-medium">{userProfile?.displayName || 'User'}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <div className="absolute right-0 mt-2 w-56 rounded-md shadow-lg py-1 bg-white dark:bg-gray-800 ring-1 ring-black dark:ring-gray-600 ring-opacity-5 z-50">
+                        <div className="px-4 py-3 text-sm text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
+                          <p className="font-medium text-base">{displayName}</p>
+                          {userProfile?.firstName && userProfile?.lastName && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {userProfile.firstName} {userProfile.lastName}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-1">
                             {userProfile?.email || ''}
                           </p>
                         </div>

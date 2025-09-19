@@ -1,88 +1,136 @@
-"use client";
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from "firebase/auth";
-import { User } from "firebase/auth"; // Import Firebase User type
-import { auth } from "@/lib/firebase";
+// context/AuthContext.tsx
+'use client';
 
-// Define the AuthContextType interface with specific types
-interface AuthContextType {
-  signIn: (email: string, password: string) => Promise<void>;
-  user: User | null;
-  loading: boolean;
-  signOut: () => Promise<void>;
-  userProfile: {
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-  } | null;
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { 
+  User, 
+  onAuthStateChanged, 
+  signOut as firebaseSignOut 
+} from 'firebase/auth';
+import { auth, db } from '@/lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  photoURL: string | null;
+  emailVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-// Create the context with default values
-const AuthContext = createContext<AuthContextType>({
-  signIn: async () => {}, // Default no-op function
-  user: null,
-  loading: true,
-  signOut: async () => {},
-  userProfile: null,
-});
+interface AuthContextType {
+  user: User | null;
+  userProfile: UserProfile | null;
+  loading: boolean;
+  signOut: () => Promise<void>;
+  refreshUserProfile: () => void;
+}
 
-export const useAuth = () => useContext(AuthContext);
+const AuthContext = createContext<AuthContextType | null>(null);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null); // Use User | null type
-  const [loading, setLoading] = useState(true); // Initialize loading as true
-  const [userProfile, setUserProfile] = useState<{
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-  } | null>(null);
-  
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser || null); // Set user to null if firebaseUser is undefined
-      
-      // Extract profile data including photo URL from Firebase user
-      if (firebaseUser) {
-        setUserProfile({
-          displayName: firebaseUser.displayName,
-          email: firebaseUser.email,
-          photoURL: firebaseUser.photoURL // This will contain the Google profile image URL
-        });
-      } else {
-        setUserProfile(null);
-      }
-      
-      setLoading(false); // Stop loading once the user state is determined
-    });
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
 
-    return () => unsubscribe(); // Clean up the listener
-  }, []);
+interface AuthProviderProps {
+  children: ReactNode;
+}
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      // Propagate the error to be caught in the login page
-      throw error;
-    }
-  };
+export const AuthProvider = ({ children }: AuthProviderProps) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   const signOut = async () => {
     try {
-      await firebaseSignOut(auth); // Call Firebase signOut function
-      setUser(null); // Reset user to null after signing out
-      setUserProfile(null); // Reset user profile
+      await firebaseSignOut(auth);
+      setUser(null);
+      setUserProfile(null);
+      router.push('/login');
     } catch (error) {
-      console.error("Error signing out:", error);
-      throw error;
+      console.error('Sign out error:', error);
     }
   };
 
+  const refreshUserProfile = () => {
+    if (user) {
+      // This will trigger the useEffect that sets up the profile listener
+      setUser({ ...user });
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    let unsubscribeProfile: (() => void) | null = null;
+
+    if (user) {
+      const userRef = doc(db, 'users', user.uid);
+      
+      unsubscribeProfile = onSnapshot(
+        userRef,
+        (doc) => {
+          if (doc.exists()) {
+            const data = doc.data();
+            setUserProfile({
+              uid: data.uid,
+              email: data.email,
+              displayName: data.displayName,
+              firstName: data.firstName,
+              lastName: data.lastName,
+              photoURL: data.photoURL,
+              emailVerified: data.emailVerified,
+              createdAt: data.createdAt?.toDate() || new Date(),
+              updatedAt: data.updatedAt?.toDate() || new Date(),
+            });
+          } else {
+            setUserProfile(null);
+          }
+        },
+        (error) => {
+          console.error('Error listening to user profile:', error);
+          setUserProfile(null);
+        }
+      );
+    } else {
+      setUserProfile(null);
+    }
+
+    return () => {
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+      }
+    };
+  }, [user]);
+
+  const value = {
+    user,
+    userProfile,
+    loading,
+    signOut,
+    refreshUserProfile,
+  };
+
   return (
-    <AuthContext.Provider value={{ user, signIn, signOut, loading, userProfile }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
 };
-
-export default AuthProvider;
