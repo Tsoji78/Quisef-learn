@@ -1,14 +1,9 @@
-// context/AuthContext.tsx
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { 
-  User, 
-  onAuthStateChanged, 
-  signOut as firebaseSignOut 
-} from 'firebase/auth';
+import { createContext, useContext, useEffect, useState, useMemo, ReactNode } from 'react';
+import { User, onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 
 export interface UserProfile {
@@ -62,10 +57,37 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
-  const refreshUserProfile = () => {
-    if (user) {
-      // This will trigger the useEffect that sets up the profile listener
-      setUser({ ...user });
+  const refreshUserProfile = async () => {
+    if (!user) return;
+    try {
+      const userRef = doc(db, 'users', user.uid);
+      const docSnap = await getDoc(userRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUserProfile((prev) => {
+          const newProfile: UserProfile = {
+            uid: data.uid,
+            email: data.email,
+            displayName: data.displayName,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            photoURL: data.photoURL,
+            emailVerified: data.emailVerified,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date(),
+          };
+          if (JSON.stringify(prev) !== JSON.stringify(newProfile)) {
+            console.log('Updating userProfile:', newProfile);
+            return newProfile;
+          }
+          return prev;
+        });
+      } else {
+        setUserProfile(null);
+      }
+    } catch (error) {
+      console.error('Error refreshing user profile:', error);
+      setUserProfile(null);
     }
   };
 
@@ -74,31 +96,36 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setUser(firebaseUser);
       setLoading(false);
     });
-
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
-
     if (user) {
       const userRef = doc(db, 'users', user.uid);
-      
       unsubscribeProfile = onSnapshot(
         userRef,
         (doc) => {
           if (doc.exists()) {
             const data = doc.data();
-            setUserProfile({
-              uid: data.uid,
-              email: data.email,
-              displayName: data.displayName,
-              firstName: data.firstName,
-              lastName: data.lastName,
-              photoURL: data.photoURL,
-              emailVerified: data.emailVerified,
-              createdAt: data.createdAt?.toDate() || new Date(),
-              updatedAt: data.updatedAt?.toDate() || new Date(),
+            setUserProfile((prev) => {
+              const newProfile: UserProfile = {
+                uid: data.uid,
+                email: data.email,
+                displayName: data.displayName,
+                firstName: data.firstName,
+                lastName: data.lastName,
+                photoURL: data.photoURL,
+                emailVerified: data.emailVerified,
+                createdAt: data.createdAt?.toDate() || new Date(),
+                updatedAt: data.updatedAt?.toDate() || new Date(),
+              };
+              if (JSON.stringify(prev) !== JSON.stringify(newProfile)) {
+                console.log('onSnapshot updating userProfile:', newProfile);
+                return newProfile;
+              }
+              console.log('No userProfile update needed');
+              return prev;
             });
           } else {
             setUserProfile(null);
@@ -112,7 +139,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     } else {
       setUserProfile(null);
     }
-
     return () => {
       if (unsubscribeProfile) {
         unsubscribeProfile();
@@ -120,17 +146,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     };
   }, [user]);
 
-  const value = {
-    user,
-    userProfile,
-    loading,
-    signOut,
-    refreshUserProfile,
-  };
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      userProfile,
+      loading,
+      signOut,
+      refreshUserProfile,
+    }),
+    [user, userProfile, loading]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

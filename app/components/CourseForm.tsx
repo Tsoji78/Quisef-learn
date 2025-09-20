@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Save, X, Loader, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import ModuleList from './ModulesList';
+import { ModuleList } from '@/components/ModulesList';
 import DraftEditor from './DraftEditor';
 import ThumbnailUploader from './ThumbnailUploader';
 import ProgressBar from './ProgressBar';
@@ -350,7 +350,7 @@ const ModulesSection = React.memo(({
     <div className="flex flex-col lg:flex-row gap-6">
       <div className="lg:w-1/3">
         <ModuleList
-          formData={formData}
+          modules={formData.modules}
           currentModuleIndex={currentModuleIndex}
           setCurrentModuleIndex={setCurrentModuleIndex}
           addModule={addModule}

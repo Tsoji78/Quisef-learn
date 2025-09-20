@@ -79,12 +79,16 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       return userProfile.email[0].toUpperCase();
     }
     
-    return 'U';
+    return 'Q'
   };
 
   if (!mounted) {
     return <div className="min-h-screen" style={{ visibility: 'hidden' }}></div>;
   }
+
+  const handleLogout = () => {
+    signOut();
+  };
 
   const displayName = getDisplayName();
   const userInitials = getUserInitials();
@@ -167,7 +171,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                           Settings
                         </a>
                         <button
-                          onClick={() => signOut()}
+                          onClick={handleLogout}
                           className="flex items-center gap-3 w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
                         >
                           <FiLogOut className="h-4 w-4" />

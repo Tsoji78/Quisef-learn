@@ -1,61 +1,84 @@
-import { Plus, Trash } from 'lucide-react';
-import { Course } from '../types';
+import React from 'react';
+import { CheckCircle, Circle, BookOpen, Video, FileText } from 'lucide-react';
+import { Module } from '@/types/course';
 
 interface ModuleListProps {
-  formData: Course;
-  currentModuleIndex: number;
-  setCurrentModuleIndex: (index: number) => void;
-  addModule: () => void;
-  removeModule: (index: number) => void;
+  modules: Module[];
+  currentModule: Module | null;
+  completedModules: string[];
+  onModuleSelect: (module: Module) => void;
 }
 
-export default function ModuleList({
-  formData,
-  currentModuleIndex,
-  setCurrentModuleIndex,
-  addModule,
-  removeModule,
-}: ModuleListProps) {
+export const ModuleList: React.FC<ModuleListProps> = ({
+  modules,
+  currentModule,
+  completedModules,
+  onModuleSelect
+}) => {
+  const getModuleIcon = (module: Module) => {
+    if (module.type === 'video') return <Video size={16} />;
+    if (module.type === 'document') return <FileText size={16} />;
+    return <BookOpen size={16} />;
+  };
+
+  const getModuleDuration = (module: Module) => {
+    return module.duration || '5 min read';
+  };
+
   return (
-    <div className="md:w-1/4">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="font-medium text-gray-700 dark:text-gray-300">Modules</h3>
-        <button
-          onClick={addModule}
-          className="flex items-center text-blue-500 hover:text-blue-700"
-        >
-          <Plus size={16} className="mr-1" />
-          <span className="text-sm">Add</span>
-        </button>
-      </div>
-      <div className="space-y-2 overflow-auto max-h-96 pr-1">
-        {formData.modules.map((module, index) => (
-          <div
+    <div className="space-y-1">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+        Course Modules
+      </h3>
+      {modules.map((module, index) => {
+        const isCompleted = completedModules.includes(module.id);
+        const isCurrent = currentModule?.id === module.id;
+        
+        return (
+          <button
             key={module.id}
-            className={`flex justify-between p-3 rounded-md cursor-pointer ${
-              currentModuleIndex === index
-                ? 'bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-500'
-                : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
+            onClick={() => onModuleSelect(module)}
+            className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
+              isCurrent
+                ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-600'
+                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
             }`}
-            onClick={() => setCurrentModuleIndex(index)}
           >
-            <div className="truncate flex-1">
-              <span className="text-sm font-medium">{module.title || `Module ${index + 1}`}</span>
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0 mt-0.5">
+                {isCompleted ? (
+                  <CheckCircle size={16} className="text-green-600" />
+                ) : (
+                  <Circle size={16} className="text-gray-400" />
+                )}
+              </div>
+              
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center space-x-2 mb-1">
+                  <span className="text-gray-400 dark:text-gray-500">
+                    {getModuleIcon(module)}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    Module {index + 1}
+                  </span>
+                </div>
+                
+                <h4 className={`text-sm font-medium leading-tight ${
+                  isCurrent
+                    ? 'text-blue-700 dark:text-blue-300'
+                    : 'text-gray-800 dark:text-white'
+                }`}>
+                  {module.title}
+                </h4>
+                
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {getModuleDuration(module)}
+                </p>
+              </div>
             </div>
-            {formData.modules.length > 1 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeModule(index);
-                }}
-                className="text-gray-500 hover:text-red-500"
-              >
-                <Trash size={14} />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+          </button>
+        );
+      })}
     </div>
   );
-}
+};
