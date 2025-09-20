@@ -11,7 +11,7 @@ export function useEnrollment(courseId: string, userId: string | null) {
 
   const handleEnrollment = useCallback(async () => {
     if (!userId) {
-      router.push(`/auth/login?redirect=${encodeURIComponent(`/dashboard/courses/${courseId}`)}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
       return false;
     }
 
