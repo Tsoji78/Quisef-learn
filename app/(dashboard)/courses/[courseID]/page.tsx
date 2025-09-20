@@ -44,19 +44,12 @@ interface Course {
   groupId?: string;
 }
 
-interface Enrollment {
-  courseId: string;
-  userId: string;
-  enrolledAt: Date;
-  status: 'active' | 'completed' | 'paused';
-}
-
 export default function CourseEnrollmentPage() {
   const { isDark } = useTheme();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const params = useParams();
-  const courseId = params.courseId as string;
+  const courseId = params?.courseId as string;
 
   const [course, setCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,8 +60,15 @@ export default function CourseEnrollmentPage() {
   const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
   const [lastModuleId, setLastModuleId] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>({});
 
   const enrollmentChecked = useRef(false);
+
+  // Debug function
+  const addDebugInfo = (key: string, value: any) => {
+    setDebugInfo((prev: any) => ({ ...prev, [key]: value }));
+    console.log(`DEBUG ${key}:`, value);
+  };
 
   // Helper function to get safe image URL
   const getSafeImageUrl = (url: string | undefined, fallbackText: string, size: string = '400/250') => {
@@ -78,19 +78,25 @@ export default function CourseEnrollmentPage() {
     return url;
   };
 
+  // Handle image load errors
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>, fallbackText: string, size: string = '400/250') => {
+    const target = e.target as HTMLImageElement;
+    target.src = `https://via.placeholder.com/${size}/e2e8f0/6b7280?text=${encodeURIComponent(fallbackText)}`;
+  };
+
   // Check enrollment status
   const checkEnrollmentStatus = async (userId: string, courseId: string) => {
     if (!userId || !courseId || enrollmentChecked.current) return;
 
     try {
-      console.log('Checking enrollment status for user:', userId, 'course:', courseId);
+      addDebugInfo('checkingEnrollment', { userId, courseId });
       const enrollmentRef = doc(db, 'users', userId, 'enrollments', courseId);
       const enrollmentSnap = await getDoc(enrollmentRef);
       const enrolled = enrollmentSnap.exists();
 
       setIsEnrolled(enrolled);
       enrollmentChecked.current = true;
-      console.log('Enrollment status for course', courseId, ':', enrolled);
+      addDebugInfo('enrollmentStatus', enrolled);
 
       if (enrolled) {
         const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
@@ -100,20 +106,113 @@ export default function CourseEnrollmentPage() {
           const readModules = progressData.readModules || {};
           const lastModule = Object.keys(readModules).sort().pop();
           setLastModuleId(lastModule || null);
+          addDebugInfo('lastModuleId', lastModule);
         }
       }
     } catch (err) {
       console.error('Error checking enrollment:', err);
+      addDebugInfo('enrollmentError', err);
       setError('Failed to check enrollment status');
+    }
+  };
+
+  // Fetch course details with enhanced error handling
+  const fetchCourse = async () => {
+    if (!courseId) {
+      addDebugInfo('fetchCourseError', 'No courseId provided');
+      setError('No course ID provided');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    addDebugInfo('fetchingCourse', { courseId });
+
+    try {
+      // Test Firebase connection first
+      addDebugInfo('testingFirebase', 'Testing Firebase connection...');
+      
+      const docRef = doc(db, 'courses', courseId);
+      addDebugInfo('docRef', docRef.path);
+      
+      const docSnap = await getDoc(docRef);
+      addDebugInfo('docSnapExists', docSnap.exists());
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        addDebugInfo('rawFirebaseData', data);
+
+        // Create course data with proper validation and defaults
+        const courseData: Course = {
+          id: docSnap.id,
+          title: data.title || 'Untitled Course',
+          instructor: data.instructor || 'Unknown Instructor',
+          description: data.description || 'No description available',
+          level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
+          duration: data.duration || 'Unknown',
+          price: typeof data.price === 'number' ? data.price : 0,
+          originalPrice: typeof data.originalPrice === 'number' ? data.originalPrice : undefined,
+          thumbnail: data.thumbnail || '',
+          category: data.category || 'Uncategorized',
+          modules: Array.isArray(data.modules) ? data.modules : [],
+          rating: typeof data.rating === 'number' ? data.rating : 4.0,
+          totalStudents: typeof data.totalStudents === 'number' ? data.totalStudents : 0,
+          lastUpdated: data.lastUpdated || new Date().toLocaleDateString(),
+          language: data.language || 'English',
+          certificate: Boolean(data.certificate),
+          requirements: Array.isArray(data.requirements) ? data.requirements : ['Basic computer skills'],
+          whatYouLearn: Array.isArray(data.whatYouLearn) ? data.whatYouLearn : ['Course content and skills'],
+          targetAudience: Array.isArray(data.targetAudience) ? data.targetAudience : ['Students interested in learning'],
+          instructor_bio: data.instructor_bio || 'Experienced instructor',
+          instructor_image: data.instructor_image || '',
+          preview_video: data.preview_video || '',
+          groupId: data.groupId || undefined,
+        };
+
+        addDebugInfo('processedCourseData', courseData);
+        setCourse(courseData);
+        addDebugInfo('courseSetSuccess', courseData.title);
+      } else {
+        addDebugInfo('courseNotFound', courseId);
+        setError('Course not found in database');
+      }
+    } catch (err: any) {
+      addDebugInfo('fetchCourseError', {
+        error: err,
+        code: err.code,
+        message: err.message,
+        stack: err.stack
+      });
+      
+      console.error('Error fetching course:', err);
+      
+      let errorMessage = 'Failed to load course';
+      if (err.code === 'permission-denied') {
+        errorMessage = 'You do not have permission to access this course';
+      } else if (err.code === 'not-found') {
+        errorMessage = 'Course not found';
+      } else if (err.code === 'unavailable') {
+        errorMessage = 'Firebase service is currently unavailable';
+      } else if (err.message) {
+        errorMessage = `Error: ${err.message}`;
+      }
+      
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
   // Handle user authentication changes
   useEffect(() => {
+    addDebugInfo('authEffect', { authLoading, user: !!user });
+    
     if (authLoading) return;
 
     if (!user) {
-      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
+      addDebugInfo('noUser', 'Redirecting to login');
+      router.push(`/auth/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
 
@@ -124,78 +223,19 @@ export default function CourseEnrollmentPage() {
 
   // Fetch course details
   useEffect(() => {
-    if (!courseId || authLoading) return;
-
-    const fetchCourse = async () => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        console.log('Fetching course with ID:', courseId);
-        const docRef = doc(db, 'courses', courseId);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const courseData: Course = {
-            id: docSnap.id,
-            title: data.title || 'Untitled Course',
-            instructor: data.instructor || 'Unknown Instructor',
-            description: data.description || 'No description available',
-            level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
-            duration: data.duration || 'Unknown',
-            price: typeof data.price === 'number' ? data.price : 0,
-            originalPrice: typeof data.originalPrice === 'number' ? data.originalPrice : undefined,
-            thumbnail: data.thumbnail || '',
-            category: data.category || 'Uncategorized',
-            modules: Array.isArray(data.modules) ? data.modules : [],
-            rating: typeof data.rating === 'number' ? data.rating : 0,
-            totalStudents: typeof data.totalStudents === 'number' ? data.totalStudents : 0,
-            lastUpdated: data.lastUpdated || 'Unknown',
-            language: data.language || 'English',
-            certificate: Boolean(data.certificate),
-            requirements: Array.isArray(data.requirements) ? data.requirements : [],
-            whatYouLearn: Array.isArray(data.whatYouLearn) ? data.whatYouLearn : [],
-            targetAudience: Array.isArray(data.targetAudience) ? data.targetAudience : [],
-            instructor_bio: data.instructor_bio || '',
-            instructor_image: data.instructor_image || '',
-            preview_video: data.preview_video || '',
-            groupId: data.groupId || undefined,
-          };
-
-          setCourse(courseData);
-          console.log('Course loaded successfully:', courseData.title);
-        } else {
-          console.error('Course not found for ID:', courseId);
-          setError(`Course not found`);
-        }
-      } catch (err: any) {
-        console.error('Error fetching course:', err);
-        if (err.code === 'permission-denied') {
-          setError('You do not have permission to access this course');
-        } else if (err.code === 'not-found') {
-          setError('Course not found');
-        } else {
-          setError(`Failed to load course: ${err.message || 'Unknown error'}`);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
+    addDebugInfo('courseEffect', { courseId, authLoading });
+    if (authLoading) return;
     fetchCourse();
   }, [courseId, authLoading]);
 
-  // Handle enrollment - FIXED VERSION WITHOUT TRANSACTIONS
+  // Handle enrollment
   const handleEnrollment = async () => {
     if (!user) {
-      console.log('No user logged in, redirecting to login');
-      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
 
     if (!course || !courseId) {
-      console.error('Invalid course data or ID:', { course: !!course, courseId });
       setError('Invalid course data');
       toast.error('Invalid course data');
       return;
@@ -204,64 +244,18 @@ export default function CourseEnrollmentPage() {
     setEnrolling(true);
     setError(null);
 
-    const enrollmentTimeout = setTimeout(() => {
-      setEnrolling(false);
-      setError('Enrollment timed out. Please try again.');
-      toast.error('Enrollment timed out. Please check your connection and try again.');
-    }, 15000);
-
     try {
-      console.log('Starting enrollment for user:', user.uid, 'in course:', courseId);
+      addDebugInfo('startingEnrollment', { userId: user.uid, courseId });
 
-      // First, check if user is already enrolled
+      // Check if already enrolled
       const enrollmentRef = doc(db, 'users', user.uid, 'enrollments', courseId);
       const enrollmentSnap = await getDoc(enrollmentRef);
 
       if (enrollmentSnap.exists()) {
-        console.log('User already enrolled:', user.uid);
         throw new Error('You are already enrolled in this course');
       }
 
-      // Find or create group - do this first before any writes
-      let groupId = course.groupId;
-      
-      if (!groupId) {
-        console.log('Looking for existing group for course:', courseId);
-        const groupsQuery = query(collection(db, 'groups'), where('courseId', '==', courseId));
-        const groupsSnapshot = await getDocs(groupsQuery);
-
-        if (!groupsSnapshot.empty) {
-          groupId = groupsSnapshot.docs[0].id;
-          console.log('Found existing group:', groupId);
-        } else {
-          console.log('Creating new group for course:', courseId);
-          // Create new group
-          const groupRef = await addDoc(collection(db, 'groups'), {
-            name: `${course.title} Study Group`,
-            description: `Study group for ${course.title}`,
-            courseId: courseId,
-            members: [],
-            memberIds: [],
-            assignments: [],
-            createdAt: serverTimestamp(),
-          });
-          groupId = groupRef.id;
-
-          // Create default chat forum for the group
-          await setDoc(doc(db, 'groups', groupId, 'chatForums', 'default'), {
-            id: 'default',
-            title: 'General Discussion',
-            description: 'General discussion for the course',
-            memberCount: 0,
-            lastMessageAt: serverTimestamp(),
-          });
-          
-          console.log('Created new group:', groupId);
-        }
-      }
-
-      // Create enrollment document
-      console.log('Creating enrollment document...');
+      // Create enrollment
       await setDoc(enrollmentRef, {
         courseId: courseId,
         userId: user.uid,
@@ -270,7 +264,6 @@ export default function CourseEnrollmentPage() {
       });
 
       // Create progress document
-      console.log('Creating progress document...');
       const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
       await setDoc(progressRef, {
         readModules: {},
@@ -281,79 +274,14 @@ export default function CourseEnrollmentPage() {
         progress: 0,
       });
 
-      // Add user to group
-      console.log('Adding user to group...');
-      const groupRef = doc(db, 'groups', groupId);
-      const groupDoc = await getDoc(groupRef);
-
-      if (groupDoc.exists()) {
-        const groupData = groupDoc.data();
-        const currentMemberIds = groupData.memberIds || [];
-
-        if (!currentMemberIds.includes(user.uid)) {
-          await updateDoc(groupRef, {
-            members: arrayUnion({
-              id: user.uid,
-              name: user.displayName || 'Anonymous User',
-              email: user.email || '',
-              role: 'Student',
-              profileImage: user.photoURL || '',
-            }),
-            memberIds: arrayUnion(user.uid),
-          });
-        }
-      }
-
-      // Update course with student count and group ID
-      console.log('Updating course...');
-      const courseRef = doc(db, 'courses', courseId);
-      await updateDoc(courseRef, {
-        totalStudents: increment(1),
-        groupId: groupId,
-      });
-
-      // Add welcome message to group chat
-      try {
-        console.log('Adding welcome message...');
-        await addDoc(collection(db, 'groups', groupId, 'chatForums', 'default', 'messages'), {
-          senderId: 'system',
-          senderName: 'System',
-          content: `Welcome ${user.displayName || 'new member'} to the ${course.title} study group!`,
-          timestamp: serverTimestamp(),
-        });
-      } catch (messageError) {
-        console.warn('Failed to add welcome message:', messageError);
-      }
-
-      clearTimeout(enrollmentTimeout);
-      console.log('Enrollment successful for user:', user.uid);
-
       setIsEnrolled(true);
-      enrollmentChecked.current = true;
       setEnrollmentSuccess(true);
-      setError(null);
-      toast.success('Enrolled successfully! Welcome to the course!');
-      router.push(`/courses/${courseId}/learn?enrolled=true`);
+      toast.success('Enrolled successfully!');
 
     } catch (err: any) {
-      clearTimeout(enrollmentTimeout);
-      console.error('Enrollment error:', err);
-
-      let errorMessage = 'Unknown error occurred';
-      if (err.message === 'You are already enrolled in this course') {
-        errorMessage = err.message;
-      } else if (err.code === 'permission-denied') {
-        errorMessage = 'You do not have permission to enroll in this course. Please contact support.';
-      } else if (err.code === 'not-found') {
-        errorMessage = 'Course not found. Please try refreshing the page.';
-      } else if (err.code === 'unavailable') {
-        errorMessage = 'Service temporarily unavailable. Please try again later.';
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-
-      setError(errorMessage);
-      toast.error(`Failed to enroll: ${errorMessage}`);
+      addDebugInfo('enrollmentError', err);
+      setError(err.message || 'Failed to enroll');
+      toast.error(`Failed to enroll: ${err.message}`);
     } finally {
       setEnrolling(false);
     }
@@ -378,10 +306,27 @@ export default function CourseEnrollmentPage() {
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   };
 
-  // Handle image load errors
-  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>, fallbackText: string, size: string = '400/250') => {
-    const target = e.target as HTMLImageElement;
-    target.src = `https://via.placeholder.com/${size}/e2e8f0/6b7280?text=${encodeURIComponent(fallbackText)}`;
+  // Debug panel (only in development)
+  const DebugPanel = () => {
+    if (process.env.NODE_ENV !== 'development') return null;
+    
+    return (
+      <div className="fixed bottom-4 left-4 bg-black bg-opacity-80 text-white p-4 rounded-lg text-xs max-w-sm max-h-60 overflow-auto z-50">
+        <h4 className="font-bold mb-2">Debug Info:</h4>
+        <pre className="whitespace-pre-wrap">
+          {JSON.stringify({
+            courseId,
+            authLoading,
+            user: user?.uid || 'No user',
+            loading,
+            error,
+            courseExists: !!course,
+            courseTitle: course?.title || 'No title',
+            ...debugInfo
+          }, null, 2)}
+        </pre>
+      </div>
+    );
   };
 
   // Loading state
@@ -390,8 +335,14 @@ export default function CourseEnrollmentPage() {
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
         <div className="flex flex-col items-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading course details...</p>
+          <p className="text-gray-600 dark:text-gray-400">
+            {authLoading ? 'Checking authentication...' : 'Loading course details...'}
+          </p>
+          <div className="text-sm text-gray-500">
+            Course ID: {courseId || 'Not found'}
+          </div>
         </div>
+        <DebugPanel />
       </div>
     );
   }
@@ -406,14 +357,27 @@ export default function CourseEnrollmentPage() {
               <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
-              {error}
+              <div>
+                <strong>Error:</strong> {error}
+                <br />
+                <small>Course ID: {courseId}</small>
+              </div>
             </div>
           </div>
-          <Link href="/courses" className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
-            <ArrowLeft size={18} className="mr-2" />
-            Back to Courses
-          </Link>
+          <div className="flex gap-4">
+            <Link href="/courses" className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
+              <ArrowLeft size={18} className="mr-2" />
+              Back to Courses
+            </Link>
+            <button 
+              onClick={fetchCourse}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            >
+              Retry
+            </button>
+          </div>
         </div>
+        <DebugPanel />
       </div>
     );
   }
@@ -422,11 +386,21 @@ export default function CourseEnrollmentPage() {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
         <div className="text-center">
-          <p className="text-gray-600 dark:text-gray-400 mb-4">Course not found</p>
-          <Link href="/courses" className="text-blue-600 dark:text-blue-400 hover:underline">
-            Back to Courses
-          </Link>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">No course data available</p>
+          <div className="text-sm text-gray-500 mb-4">Course ID: {courseId}</div>
+          <div className="flex gap-4 justify-center">
+            <Link href="/courses" className="text-blue-600 dark:text-blue-400 hover:underline">
+              Back to Courses
+            </Link>
+            <button 
+              onClick={fetchCourse}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            >
+              Retry Loading
+            </button>
+          </div>
         </div>
+        <DebugPanel />
       </div>
     );
   }
@@ -577,23 +551,27 @@ export default function CourseEnrollmentPage() {
                     <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">
                       Course Curriculum ({course.modules.length} modules)
                     </h3>
-                    <div className="space-y-4">
-                      {course.modules.map((module, index) => (
-                        <div
-                          key={module.id}
-                          className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">{index + 1}.</span>
-                            <BookOpen size={16} className="text-gray-400 dark:text-gray-500" />
-                            <span className="font-medium text-gray-800 dark:text-white flex-1">{module.title}</span>
-                            {module.duration && (
-                              <span className="text-sm text-gray-500 dark:text-gray-400">{module.duration}</span>
-                            )}
+                    {course.modules.length > 0 ? (
+                      <div className="space-y-4">
+                        {course.modules.map((module, index) => (
+                          <div
+                            key={module.id}
+                            className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">{index + 1}.</span>
+                              <BookOpen size={16} className="text-gray-400 dark:text-gray-500" />
+                              <span className="font-medium text-gray-800 dark:text-white flex-1">{module.title}</span>
+                              {module.duration && (
+                                <span className="text-sm text-gray-500 dark:text-gray-400">{module.duration}</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500 dark:text-gray-400">No modules available</p>
+                    )}
                   </div>
                 )}
 
@@ -664,10 +642,10 @@ export default function CourseEnrollmentPage() {
               ) : (
                 <button
                   onClick={() => setShowEnrollmentModal(true)}
-                  disabled={enrolling || authLoading}
+                  disabled={enrolling}
                   className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 sm:py-3 px-4 rounded-lg transition-colors mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {enrolling ? 'Enrolling...' : authLoading ? 'Loading...' : 'Enroll Now'}
+                  {enrolling ? 'Enrolling...' : 'Enroll Now'}
                 </button>
               )}
 
@@ -789,6 +767,8 @@ export default function CourseEnrollmentPage() {
           </div>
         </div>
       )}
+
+      <DebugPanel />
     </div>
   );
 }
