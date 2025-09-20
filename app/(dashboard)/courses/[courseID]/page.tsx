@@ -70,6 +70,14 @@ export default function CourseEnrollmentPage() {
 
   const enrollmentChecked = useRef(false);
 
+  // Helper function to get safe image URL
+  const getSafeImageUrl = (url: string | undefined, fallbackText: string, size: string = '400/250') => {
+    if (!url || url.includes('/api/placeholder/')) {
+      return `https://via.placeholder.com/${size}/e2e8f0/6b7280?text=${encodeURIComponent(fallbackText)}`;
+    }
+    return url;
+  };
+
   // Check enrollment status
   const checkEnrollmentStatus = async (userId: string, courseId: string) => {
     if (!userId || !courseId || enrollmentChecked.current) return;
@@ -105,7 +113,7 @@ export default function CourseEnrollmentPage() {
     if (authLoading) return;
 
     if (!user) {
-      router.push(`/login?redirect=/courses/${courseId}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
       return;
     }
 
@@ -138,7 +146,7 @@ export default function CourseEnrollmentPage() {
             duration: data.duration || 'Unknown',
             price: typeof data.price === 'number' ? data.price : 0,
             originalPrice: typeof data.originalPrice === 'number' ? data.originalPrice : undefined,
-            thumbnail: data.thumbnail || '/api/placeholder/400/250?text=Course+Image',
+            thumbnail: data.thumbnail || '',
             category: data.category || 'Uncategorized',
             modules: Array.isArray(data.modules) ? data.modules : [],
             rating: typeof data.rating === 'number' ? data.rating : 0,
@@ -182,7 +190,7 @@ export default function CourseEnrollmentPage() {
   const handleEnrollment = async () => {
     if (!user) {
       console.log('No user logged in, redirecting to login');
-      router.push(`/login?redirect=/courses/${courseId}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
       return;
     }
 
@@ -370,6 +378,12 @@ export default function CourseEnrollmentPage() {
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   };
 
+  // Handle image load errors
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>, fallbackText: string, size: string = '400/250') => {
+    const target = e.target as HTMLImageElement;
+    target.src = `https://via.placeholder.com/${size}/e2e8f0/6b7280?text=${encodeURIComponent(fallbackText)}`;
+  };
+
   // Loading state
   if (loading || authLoading) {
     return (
@@ -438,13 +452,10 @@ export default function CourseEnrollmentPage() {
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden mb-6 lg:mb-8">
               <div className="relative">
                 <img
-                  src={course.thumbnail}
+                  src={getSafeImageUrl(course.thumbnail, course.title)}
                   alt={course.title}
                   className="w-full h-48 sm:h-64 object-cover"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = '/api/placeholder/400/250?text=' + encodeURIComponent(course.title);
-                  }}
+                  onError={(e) => handleImageError(e, course.title)}
                 />
                 {course.preview_video && (
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -590,13 +601,10 @@ export default function CourseEnrollmentPage() {
                   <div>
                     <div className="flex items-start gap-4 mb-6">
                       <img
-                        src={course.instructor_image || '/api/placeholder/80/80?text=Instructor'}
+                        src={getSafeImageUrl(course.instructor_image, course.instructor, '80/80')}
                         alt={course.instructor}
                         className="w-16 sm:w-20 h-16 sm:h-20 rounded-full object-cover"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.src = '/api/placeholder/80/80?text=' + encodeURIComponent(course.instructor);
-                        }}
+                        onError={(e) => handleImageError(e, course.instructor, '80/80')}
                       />
                       <div>
                         <h3 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-white">{course.instructor}</h3>

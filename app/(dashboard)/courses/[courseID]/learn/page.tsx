@@ -82,24 +82,53 @@ export default function CourseDetailPage() {
 
   // Helper to get friendly error messages
   const getFriendlyErrorMessage = (error: any): string => {
-    switch (error.code) {
-      case 'permission-denied':
-        return 'You do not have permission to access this course. Please enroll or contact support.';
-      case 'not-found':
-        return 'Course or progress data not found.';
-      case 'unavailable':
-        return 'Service temporarily unavailable. Please try again later.';
-      default:
-        return error.message || 'An unexpected error occurred.';
+    console.error('Full error object:', error);
+    
+    if (!error) return 'Unknown error occurred';
+    
+    // Handle Firebase errors
+    if (error.code) {
+      switch (error.code) {
+        case 'permission-denied':
+          return 'You do not have permission to access this course. Please enroll or contact support.';
+        case 'not-found':
+          return 'Course or progress data not found.';
+        case 'unavailable':
+          return 'Service temporarily unavailable. Please try again later.';
+        case 'unauthenticated':
+          return 'Please log in to access this course.';
+        case 'failed-precondition':
+          return 'Database operation failed. Please try again.';
+        case 'deadline-exceeded':
+          return 'Request timed out. Please check your connection and try again.';
+        default:
+          return `Database error (${error.code}): ${error.message || 'Unknown error'}`;
+      }
     }
+    
+    // Handle network errors
+    if (error.message?.includes('network') || error.message?.includes('fetch')) {
+      return 'Network error. Please check your internet connection and try again.';
+    }
+    
+    return error.message || 'An unexpected error occurred while loading the course.';
   };
 
-  // Generate certificate function
+  // Validate Firebase configuration
+  const validateFirebaseConfig = useCallback(() => {
+    if (!db) {
+      throw new Error('Firebase database is not initialized. Please check your Firebase configuration.');
+    }
+  }, []);
+
+  // Generate certificate function with better error handling
   const generateCertificate = useCallback(async () => {
     if (!user || !course || userProgress.certificateGenerated || generatingCertificate) return;
 
     setGeneratingCertificate(true);
     try {
+      validateFirebaseConfig();
+      
       const certificateData = {
         userId: user.uid,
         courseId: course.id,
@@ -109,61 +138,85 @@ export default function CourseDetailPage() {
         issuedDate: new Date(),
       };
 
-      // Create certificate document
-      const certificateRef = collection(db, 'certificates');
-      const newCertificateDoc = await addDoc(certificateRef, certificateData);
+      // Create certificate document with retry logic
+      let retries = 3;
+      let certificateRef;
+      
+      while (retries > 0) {
+        try {
+          certificateRef = collection(db, 'certificates');
+          const newCertificateDoc = await addDoc(certificateRef, certificateData);
+          
+          // Update progress with certificate info
+          const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
+          await updateDoc(progressRef, {
+            certificateGenerated: true,
+            certificateId: newCertificateDoc.id,
+          });
 
-      // Update progress with certificate info
-      const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
-      await updateDoc(progressRef, {
-        certificateGenerated: true,
-        certificateId: newCertificateDoc.id,
-      });
+          const newCertificate: Certificate = {
+            ...certificateData,
+            id: newCertificateDoc.id,
+          };
 
-      const newCertificate: Certificate = {
-        ...certificateData,
-        id: newCertificateDoc.id,
-      };
+          setCertificate(newCertificate);
+          setUserProgress((prev) => ({
+            ...prev,
+            certificateGenerated: true,
+            certificateId: newCertificateDoc.id,
+          }));
 
-      setCertificate(newCertificate);
-      setUserProgress((prev) => ({
-        ...prev,
-        certificateGenerated: true,
-        certificateId: newCertificateDoc.id,
-      }));
-
-      toast.success('Certificate generated successfully!');
+          toast.success('Certificate generated successfully!');
+          break;
+        } catch (err) {
+          retries--;
+          if (retries === 0) throw err;
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+        }
+      }
     } catch (error) {
       console.error('Error generating certificate:', error);
-      toast.error('Failed to generate certificate');
+      toast.error('Failed to generate certificate: ' + getFriendlyErrorMessage(error));
     } finally {
       setGeneratingCertificate(false);
     }
-  }, [user, course, courseId, userProgress.certificateGenerated, generatingCertificate]);
+  }, [user, course, courseId, userProgress.certificateGenerated, generatingCertificate, validateFirebaseConfig]);
 
-  // Fetch course and user progress
-  useEffect(() => {
-    if (!courseId || authLoading) return;
+  // Enhanced data fetching with retry logic
+  const fetchData = useCallback(async () => {
+    if (!courseId || authLoading || !user) return;
 
-    const fetchData = async () => {
-      if (!user) {
-        router.push(`/login?redirect=/courses/${courseId}/learn`);
-        return;
-      }
+    setLoading(true);
+    setError(null);
 
-      setLoading(true);
-      setError(null);
+    let retries = 3;
+    const retryDelay = 1000; // 1 second
 
+    while (retries > 0) {
       try {
-        // Fetch course data
-        const docRef = doc(db, 'courses', courseId);
-        const docSnap = await getDoc(docRef);
+        validateFirebaseConfig();
+        
+        // Fetch course data with timeout
+        const coursePromise = Promise.race([
+          getDoc(doc(db, 'courses', courseId)),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Request timeout')), 10000)
+          )
+        ]) as Promise<any>;
+
+        const docSnap = await coursePromise;
 
         if (!docSnap.exists()) {
           throw new Error('Course not found');
         }
 
         const data = docSnap.data();
+        
+        // Validate required fields
+        if (!data) {
+          throw new Error('Course data is empty');
+        }
+
         const courseData: Course = {
           id: docSnap.id,
           title: data.title || 'Untitled Course',
@@ -171,7 +224,7 @@ export default function CourseDetailPage() {
           description: data.description || 'No description available.',
           level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
           duration: data.duration || 'Unknown',
-          progress: data.progress || 0,
+          progress: typeof data.progress === 'number' ? data.progress : 0,
           thumbnail: data.thumbnail || '/api/placeholder/400/250?text=Course+Image',
           category: data.category || 'Uncategorized',
           modules: Array.isArray(data.modules)
@@ -183,11 +236,22 @@ export default function CourseDetailPage() {
               }))
             : [],
         };
+
+        if (courseData.modules.length === 0) {
+          console.warn('Course has no modules');
+        }
+
         setCourse(courseData);
 
-        // Fetch user progress
-        const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
-        const progressSnap = await getDoc(progressRef);
+        // Fetch user progress with timeout
+        const progressPromise = Promise.race([
+          getDoc(doc(db, 'users', user.uid, 'courseProgress', courseId)),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Progress fetch timeout')), 10000)
+          )
+        ]) as Promise<any>;
+
+        const progressSnap = await progressPromise;
 
         if (progressSnap.exists()) {
           const progressData = progressSnap.data();
@@ -197,7 +261,7 @@ export default function CourseDetailPage() {
             lastReadDate: progressData.lastReadDate?.toDate() || new Date(),
             courseId: progressData.courseId || courseId,
             userId: progressData.userId || user.uid,
-            progress: progressData.progress || 0,
+            progress: typeof progressData.progress === 'number' ? progressData.progress : 0,
             completed: progressData.completed || false,
             completionDate: progressData.completionDate?.toDate(),
             certificateGenerated: progressData.certificateGenerated || false,
@@ -224,6 +288,7 @@ export default function CourseDetailPage() {
               }
             } catch (certError) {
               console.warn('Error loading certificate:', certError);
+              // Don't fail the entire page load for certificate errors
             }
           }
         } else {
@@ -236,22 +301,48 @@ export default function CourseDetailPage() {
             userId: user.uid,
             progress: 0,
           };
-          await setDoc(progressRef, defaultProgress);
-          setUserProgress(defaultProgress);
-          toast.success('Course progress initialized!');
+          
+          try {
+            await setDoc(doc(db, 'users', user.uid, 'courseProgress', courseId), defaultProgress);
+            setUserProgress(defaultProgress);
+            toast.success('Course progress initialized!');
+          } catch (initError) {
+            console.warn('Failed to initialize progress, continuing without save capability:', initError);
+            setUserProgress(defaultProgress);
+          }
         }
+
+        break; // Success, exit retry loop
       } catch (err: any) {
-        console.error('Error fetching data:', err);
-        setError(getFriendlyErrorMessage(err));
-      } finally {
-        setLoading(false);
+        console.error(`Fetch attempt ${4 - retries} failed:`, err);
+        retries--;
+        
+        if (retries === 0) {
+          setError(getFriendlyErrorMessage(err));
+          break;
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
       }
-    };
+    }
+    
+    setLoading(false);
+  }, [courseId, user, authLoading, validateFirebaseConfig]);
 
-    fetchData();
-  }, [courseId, user, authLoading, router]);
+  // Fetch course and user progress
+  useEffect(() => {
+    if (!user && !authLoading) {
+      router.push(`/login?redirect=/courses/${courseId}/learn`);
+      return;
+    }
 
-  // Save user progress with debouncing
+    if (user && courseId) {
+      fetchData();
+    }
+  }, [courseId, user, authLoading, router, fetchData]);
+
+  // Enhanced progress saving with better error handling
   const saveUserProgress = useCallback(
     async (updatedProgress: UserProgress) => {
       if (!user || !course || savingProgress) return;
@@ -266,6 +357,8 @@ export default function CourseDetailPage() {
         setSavingProgress(true);
 
         try {
+          validateFirebaseConfig();
+          
           // Calculate progress percentage
           const totalModules = course.modules.length;
           const completedModules = Object.values(updatedProgress.readModules).filter(Boolean).length;
@@ -280,57 +373,68 @@ export default function CourseDetailPage() {
             completed: isNowCompleted || updatedProgress.completed || false,
             completionDate: isNowCompleted && !wasCompleted
               ? new Date()
-              : updatedProgress.completionDate || null,
+              : updatedProgress.completionDate ?? undefined,
             lastReadDate: new Date(),
           };
 
-          // Use transaction for atomic updates
-          await runTransaction(db, async (transaction) => {
-            // ALL READS FIRST
-            const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
-            const courseRef = doc(db, 'courses', courseId);
+          // Use transaction for atomic updates with retry
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              await runTransaction(db, async (transaction) => {
+                // ALL READS FIRST
+                const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
+                const courseRef = doc(db, 'courses', courseId);
 
-            const progressDoc = await transaction.get(progressRef);
-            const courseDoc = await transaction.get(courseRef);
+                const progressDoc = await transaction.get(progressRef);
+                const courseDoc = await transaction.get(courseRef);
 
-            if (!progressDoc.exists()) {
-              throw new Error('Progress document not found');
+                if (!progressDoc.exists()) {
+                  throw new Error('Progress document not found');
+                }
+                if (!courseDoc.exists()) {
+                  throw new Error('Course document not found');
+                }
+
+                // Get current course progress from Firestore
+                const currentCourseData = courseDoc.data();
+                const currentCourseProgress = currentCourseData?.progress ?? 0;
+
+                // ALL WRITES AFTER READS
+                // Update progress document
+                transaction.update(progressRef, {
+                  readModules: progressToSave.readModules,
+                  scrollPositions: progressToSave.scrollPositions,
+                  lastReadDate: progressToSave.lastReadDate,
+                  progress: progressToSave.progress,
+                  completed: progressToSave.completed,
+                  completionDate: progressToSave.completionDate,
+                });
+
+                // Update course progress if changed
+                if (newProgressPercentage !== currentCourseProgress) {
+                  transaction.update(courseRef, { progress: newProgressPercentage });
+                }
+              });
+
+              // Update local state AFTER successful transaction
+              setUserProgress(progressToSave);
+              setCourse((prev) => (prev ? { ...prev, progress: newProgressPercentage } : null));
+
+              // Handle completion AFTER transaction completes
+              if (isNowCompleted && !wasCompleted) {
+                toast.success('🎉 Congratulations! You completed the course!');
+                setShowCongratulations(true);
+                // Generate certificate separately (not in transaction)
+                await generateCertificate();
+              }
+              
+              break; // Success, exit retry loop
+            } catch (err) {
+              retries--;
+              if (retries === 0) throw err;
+              await new Promise(resolve => setTimeout(resolve, 1000));
             }
-            if (!courseDoc.exists()) {
-              throw new Error('Course document not found');
-            }
-
-            // Get current course progress from Firestore
-            const currentCourseData = courseDoc.data();
-            const currentCourseProgress = currentCourseData?.progress ?? 0;
-
-            // ALL WRITES AFTER READS
-            // Update progress document
-            transaction.update(progressRef, {
-              readModules: progressToSave.readModules,
-              scrollPositions: progressToSave.scrollPositions,
-              lastReadDate: progressToSave.lastReadDate,
-              progress: progressToSave.progress,
-              completed: progressToSave.completed,
-              completionDate: progressToSave.completionDate,
-            });
-
-            // Update course progress if changed
-            if (newProgressPercentage !== currentCourseProgress) {
-              transaction.update(courseRef, { progress: newProgressPercentage });
-            }
-          });
-
-          // Update local state AFTER successful transaction
-          setUserProgress(progressToSave);
-          setCourse((prev) => (prev ? { ...prev, progress: newProgressPercentage } : null));
-
-          // Handle completion AFTER transaction completes
-          if (isNowCompleted && !wasCompleted) {
-            toast.success('🎉 Congratulations! You completed the course!');
-            setShowCongratulations(true);
-            // Generate certificate separately (not in transaction)
-            await generateCertificate();
           }
         } catch (err: any) {
           console.error('Error saving progress:', err);
@@ -340,7 +444,7 @@ export default function CourseDetailPage() {
         }
       }, 1000); // 1 second debounce
     },
-    [user, course, courseId, savingProgress, generateCertificate]
+    [user, course, courseId, savingProgress, generateCertificate, validateFirebaseConfig]
   );
 
   // Handle scroll for progress tracking
@@ -370,7 +474,10 @@ export default function CourseDetailPage() {
           ...userProgress.readModules,
           [moduleId]: true,
         };
-        toast.success(`Module "${course?.modules.find((m) => m.id === moduleId)?.title}" completed!`);
+        const moduleTitle = course?.modules.find((m) => m.id === moduleId)?.title;
+        if (moduleTitle) {
+          toast.success(`Module "${moduleTitle}" completed!`);
+        }
       }
 
       setUserProgress(updatedProgress);
@@ -399,131 +506,137 @@ export default function CourseDetailPage() {
     }));
   };
 
-  // Download certificate as PNG
+  // Download certificate as PNG with error handling
   const downloadCertificate = useCallback(
     (cert: Certificate) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = 1600;
-      canvas.height = 900;
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          toast.error('Unable to generate certificate: Canvas context not available.');
+          return;
+        }
+        
+        canvas.width = 1600;
+        canvas.height = 900;
 
-      if (!ctx) {
-        toast.error('Unable to generate certificate: Canvas context not available.');
-        return;
+        // Gradient background
+        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, isDark ? '#1f2937' : '#f8fafc');
+        gradient.addColorStop(1, isDark ? '#374151' : '#e2e8f0');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Decorative border
+        ctx.strokeStyle = isDark ? '#a78bfa' : '#d4af37';
+        ctx.lineWidth = 12;
+        ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
+
+        // Inner border
+        ctx.strokeStyle = isDark ? '#60a5fa' : '#1e40af';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(90, 90, canvas.width - 180, canvas.height - 180);
+
+        // Corner decorations
+        const cornerSize = 80;
+        ctx.fillStyle = isDark ? '#a78bfa' : '#d4af37';
+        [
+          [90, 90],
+          [canvas.width - 170, 90],
+          [90, canvas.height - 98],
+          [canvas.width - 170, canvas.height - 98],
+        ].forEach(([x, y]) => {
+          ctx.fillRect(x, y, cornerSize, 8);
+          ctx.fillRect(x, y, 8, cornerSize);
+        });
+
+        ctx.textAlign = 'center';
+
+        // Certificate content
+        ctx.fillStyle = isDark ? '#93c5fd' : '#1e40af';
+        ctx.font = 'bold 64px serif';
+        ctx.fillText('CERTIFICATE OF COMPLETION', canvas.width / 2, 200);
+
+        // Decorative line
+        ctx.strokeStyle = isDark ? '#a78bfa' : '#d4af37';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2 - 300, 230);
+        ctx.lineTo(canvas.width / 2 + 300, 230);
+        ctx.stroke();
+
+        // Certificate text
+        ctx.font = '28px serif';
+        ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
+        ctx.fillText('This is to certify that', canvas.width / 2, 300);
+
+        // Student name
+        ctx.font = 'bold 56px serif';
+        ctx.fillStyle = isDark ? '#a78bfa' : '#d4af37';
+        ctx.fillText(cert.studentName.toUpperCase(), canvas.width / 2, 380);
+
+        // Underline for student name
+        ctx.strokeStyle = isDark ? '#a78bfa' : '#d4af37';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const nameWidth = ctx.measureText(cert.studentName.toUpperCase()).width;
+        ctx.moveTo(canvas.width / 2 - nameWidth / 2 - 20, 400);
+        ctx.lineTo(canvas.width / 2 + nameWidth / 2 + 20, 400);
+        ctx.stroke();
+
+        // Course completion text
+        ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
+        ctx.font = '28px serif';
+        ctx.fillText('has successfully completed the course', canvas.width / 2, 460);
+
+        // Course name
+        ctx.font = 'bold 42px serif';
+        ctx.fillStyle = isDark ? '#93c5fd' : '#1e40af';
+        ctx.fillText(cert.courseName, canvas.width / 2, 530);
+
+        // Completion date
+        ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
+        ctx.font = '24px serif';
+        ctx.fillText(
+          `Completed on ${cert.completionDate.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          })}`,
+          canvas.width / 2,
+          600
+        );
+
+        // Branding
+        ctx.fillStyle = isDark ? '#93c5fd' : '#1e40af';
+        ctx.font = 'bold 32px serif';
+        ctx.fillText('QUISEF LEARN', canvas.width / 2, 720);
+
+        // Issue date
+        ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
+        ctx.font = '20px serif';
+        ctx.fillText(
+          `Issued on ${cert.issuedDate.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          })}`,
+          canvas.width / 2,
+          760
+        );
+
+        // Download
+        const link = document.createElement('a');
+        link.download = `${cert.studentName.replace(/\s+/g, '_')}_${cert.courseName.replace(/\s+/g, '_')}_Certificate.png`;
+        link.href = canvas.toDataURL('image/png', 1.0);
+        link.click();
+
+        toast.success('Certificate downloaded successfully!');
+      } catch (error) {
+        console.error('Error downloading certificate:', error);
+        toast.error('Failed to download certificate');
       }
-
-      // Gradient background
-      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      gradient.addColorStop(0, isDark ? '#1f2937' : '#f8fafc');
-      gradient.addColorStop(1, isDark ? '#374151' : '#e2e8f0');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Decorative border
-      ctx.strokeStyle = isDark ? '#a78bfa' : '#d4af37';
-      ctx.lineWidth = 12;
-      ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
-
-      // Inner border
-      ctx.strokeStyle = isDark ? '#60a5fa' : '#1e40af';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(90, 90, canvas.width - 180, canvas.height - 180);
-
-      // Corner decorations
-      const cornerSize = 80;
-      ctx.fillStyle = isDark ? '#a78bfa' : '#d4af37';
-      [
-        [90, 90],
-        [canvas.width - 170, 90],
-        [90, canvas.height - 98],
-        [canvas.width - 170, canvas.height - 98],
-      ].forEach(([x, y]) => {
-        ctx.fillRect(x, y, cornerSize, 8);
-        ctx.fillRect(x, y, 8, cornerSize);
-      });
-
-      ctx.textAlign = 'center';
-
-      // Certificate content
-      ctx.fillStyle = isDark ? '#93c5fd' : '#1e40af';
-      ctx.font = 'bold 64px serif';
-      ctx.fillText('CERTIFICATE OF COMPLETION', canvas.width / 2, 200);
-
-      // Decorative line
-      ctx.strokeStyle = isDark ? '#a78bfa' : '#d4af37';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(canvas.width / 2 - 300, 230);
-      ctx.lineTo(canvas.width / 2 + 300, 230);
-      ctx.stroke();
-
-      // Certificate text
-      ctx.font = '28px serif';
-      ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
-      ctx.fillText('This is to certify that', canvas.width / 2, 300);
-
-      // Student name
-      ctx.font = 'bold 56px serif';
-      ctx.fillStyle = isDark ? '#a78bfa' : '#d4af37';
-      ctx.fillText(cert.studentName.toUpperCase(), canvas.width / 2, 380);
-
-      // Underline for student name
-      ctx.strokeStyle = isDark ? '#a78bfa' : '#d4af37';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      const nameWidth = ctx.measureText(cert.studentName.toUpperCase()).width;
-      ctx.moveTo(canvas.width / 2 - nameWidth / 2 - 20, 400);
-      ctx.lineTo(canvas.width / 2 + nameWidth / 2 + 20, 400);
-      ctx.stroke();
-
-      // Course completion text
-      ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
-      ctx.font = '28px serif';
-      ctx.fillText('has successfully completed the course', canvas.width / 2, 460);
-
-      // Course name
-      ctx.font = 'bold 42px serif';
-      ctx.fillStyle = isDark ? '#93c5fd' : '#1e40af';
-      ctx.fillText(cert.courseName, canvas.width / 2, 530);
-
-      // Completion date
-      ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
-      ctx.font = '24px serif';
-      ctx.fillText(
-        `Completed on ${cert.completionDate.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })}`,
-        canvas.width / 2,
-        600
-      );
-
-      // Branding
-      ctx.fillStyle = isDark ? '#93c5fd' : '#1e40af';
-      ctx.font = 'bold 32px serif';
-      ctx.fillText('QUISEF LEARN', canvas.width / 2, 720);
-
-      // Issue date
-      ctx.fillStyle = isDark ? '#d1d5db' : '#64748b';
-      ctx.font = '20px serif';
-      ctx.fillText(
-        `Issued on ${cert.issuedDate.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })}`,
-        canvas.width / 2,
-        760
-      );
-
-      // Download
-      const link = document.createElement('a');
-      link.download = `${cert.studentName.replace(/\s+/g, '_')}_${cert.courseName.replace(/\s+/g, '_')}_Certificate.png`;
-      link.href = canvas.toDataURL('image/png', 1.0);
-      link.click();
-
-      toast.success('Certificate downloaded successfully!');
     },
     [isDark]
   );
@@ -537,7 +650,8 @@ export default function CourseDetailPage() {
     if (typeof content === 'string') {
       try {
         return <div className="prose dark:prose-invert max-w-none">{parse(content)}</div>;
-      } catch {
+      } catch (parseError) {
+        console.warn('Error parsing HTML content:', parseError);
         return <div className="prose dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: content }} />;
       }
     }
@@ -709,10 +823,21 @@ export default function CourseDetailPage() {
               {error || 'Course not found'}
             </div>
           </div>
-          <Link href="/courses" className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
-            <ArrowLeft size={18} className="mr-2" />
-            Back to Courses
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Link href="/courses" className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
+              <ArrowLeft size={18} className="mr-2" />
+              Back to Courses
+            </Link>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="flex items-center text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -848,41 +973,59 @@ export default function CourseDetailPage() {
                     <span className="text-sm">Generating certificate...</span>
                   </div>
                 )}
+                {savingProgress && (
+                  <div className="flex items-center gap-2 text-blue-600 dark:text-blue-500">
+                    <div className="animate-spin rounded-full h-3 w-3 border-t border-blue-600"></div>
+                    <span className="text-sm">Saving...</span>
+                  </div>
+                )}
               </h2>
               <div className="divide-y dark:divide-gray-700">
-                {course.modules.map((module, index) => (
-                  <div key={module.id}>
-                    <div
-                      className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
-                      onClick={() => toggleModule(module.id)}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">{index + 1}.</span>
-                        <span className="font-medium text-gray-800 dark:text-white">{module.title}</span>
-                        {userProgress.readModules[module.id] && <CheckCircle className="text-green-500" size={16} />}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {module.duration && <span className="text-sm text-gray-500 dark:text-gray-400">{module.duration}</span>}
-                        {expandedModules[module.id] ? (
-                          <ChevronUp className="text-gray-500 dark:text-gray-400" size={20} />
-                        ) : (
-                          <ChevronDown className="text-gray-500 dark:text-gray-400" size={20} />
-                        )}
-                      </div>
-                    </div>
-                    {expandedModules[module.id] && (
+                {course.modules && course.modules.length > 0 ? (
+                  course.modules.map((module, index) => (
+                    <div key={module.id}>
                       <div
-                        className="px-4 py-4 text-gray-700 dark:text-gray-300 prose dark:prose-invert max-w-none max-h-[60vh] overflow-y-auto"
-                        ref={(el) => {
-                          contentRefs.current[module.id] = el;
-                        }}
-                        onScroll={() => handleScroll(module.id)}
+                        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
+                        onClick={() => toggleModule(module.id)}
                       >
-                        {renderModuleContent(module.content)}
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-gray-500 dark:text-gray-400">{index + 1}.</span>
+                          <span className="font-medium text-gray-800 dark:text-white">{module.title}</span>
+                          {userProgress.readModules[module.id] && <CheckCircle className="text-green-500" size={16} />}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {module.duration && <span className="text-sm text-gray-500 dark:text-gray-400">{module.duration}</span>}
+                          {expandedModules[module.id] ? (
+                            <ChevronUp className="text-gray-500 dark:text-gray-400" size={20} />
+                          ) : (
+                            <ChevronDown className="text-gray-500 dark:text-gray-400" size={20} />
+                          )}
+                        </div>
                       </div>
-                    )}
+                      {expandedModules[module.id] && (
+                        <div
+                          className="px-4 py-4 text-gray-700 dark:text-gray-300 prose dark:prose-invert max-w-none max-h-[60vh] overflow-y-auto"
+                          ref={(el) => {
+                            contentRefs.current[module.id] = el;
+                          }}
+                          onScroll={() => handleScroll(module.id)}
+                        >
+                          {renderModuleContent(module.content)}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                    <div className="mb-4">
+                      <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <p className="text-lg font-medium">No course content available</p>
+                    <p className="text-sm">This course doesn't have any modules yet.</p>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>
@@ -911,22 +1054,26 @@ export default function CourseDetailPage() {
                   />
                 </div>
               </div>
-              <div className="space-y-2 mb-6">
-                {course.modules.map((module, index) => (
-                  <div
-                    key={module.id}
-                    className="flex items-center gap-2 text-sm cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded"
-                    onClick={() => toggleModule(module.id)}
-                  >
-                    {userProgress.readModules[module.id] ? (
-                      <CheckCircle className="text-green-500 flex-shrink-0" size={16} />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-gray-500 flex-shrink-0" />
-                    )}
-                    <span className="truncate">{module.title}</span>
-                  </div>
-                ))}
-              </div>
+              
+              {course.modules && course.modules.length > 0 && (
+                <div className="space-y-2 mb-6">
+                  {course.modules.map((module, index) => (
+                    <div
+                      key={module.id}
+                      className="flex items-center gap-2 text-sm cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded"
+                      onClick={() => toggleModule(module.id)}
+                    >
+                      {userProgress.readModules[module.id] ? (
+                        <CheckCircle className="text-green-500 flex-shrink-0" size={16} />
+                      ) : (
+                        <div className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-gray-500 flex-shrink-0" />
+                      )}
+                      <span className="truncate">{module.title}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
               {userProgress.completed && certificate ? (
                 <div className="space-y-3 mb-6">
                   <button
