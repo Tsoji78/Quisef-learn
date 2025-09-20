@@ -1,7 +1,9 @@
+// app/courses/[courseId]/page.tsx
+
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, addDoc, arrayUnion, increment, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { ArrowLeft, Clock, Users, Star, CheckCircle, PlayCircle, BookOpen, Award, Shield, Calendar, Globe, Download } from 'lucide-react';
@@ -10,6 +12,13 @@ import parse from 'html-react-parser';
 import { toast } from 'react-hot-toast';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
+// Add this at the very top of your app/courses/[courseId]/page.tsx file
+
+import { Metadata } from 'next';
+
+
+
+
 
 interface Module {
   id: string;
@@ -44,11 +53,13 @@ interface Course {
   groupId?: string;
 }
 
+// App Router page component
 export default function CourseEnrollmentPage() {
+  const params = useParams();
+  const router = useRouter();
   const { isDark } = useTheme();
   const { user, loading: authLoading } = useAuth();
-  const router = useRouter();
-  const params = useParams();
+  
   const courseId = params?.courseId as string;
 
   const [course, setCourse] = useState<Course | null>(null);
@@ -62,12 +73,10 @@ export default function CourseEnrollmentPage() {
   const [lastModuleId, setLastModuleId] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>({});
 
-  const enrollmentChecked = useRef(false);
-
   // Debug function
   const addDebugInfo = (key: string, value: any) => {
-    setDebugInfo((prev: any) => ({ ...prev, [key]: value }));
     console.log(`DEBUG ${key}:`, value);
+    setDebugInfo(prev => ({ ...prev, [key]: value }));
   };
 
   // Helper function to get safe image URL
@@ -86,7 +95,7 @@ export default function CourseEnrollmentPage() {
 
   // Check enrollment status
   const checkEnrollmentStatus = async (userId: string, courseId: string) => {
-    if (!userId || !courseId || enrollmentChecked.current) return;
+    if (!userId || !courseId) return;
 
     try {
       addDebugInfo('checkingEnrollment', { userId, courseId });
@@ -95,7 +104,6 @@ export default function CourseEnrollmentPage() {
       const enrolled = enrollmentSnap.exists();
 
       setIsEnrolled(enrolled);
-      enrollmentChecked.current = true;
       addDebugInfo('enrollmentStatus', enrolled);
 
       if (enrolled) {
@@ -112,11 +120,10 @@ export default function CourseEnrollmentPage() {
     } catch (err) {
       console.error('Error checking enrollment:', err);
       addDebugInfo('enrollmentError', err);
-      setError('Failed to check enrollment status');
     }
   };
 
-  // Fetch course details with enhanced error handling
+  // Fetch course details
   const fetchCourse = async () => {
     if (!courseId) {
       addDebugInfo('fetchCourseError', 'No courseId provided');
@@ -130,20 +137,26 @@ export default function CourseEnrollmentPage() {
     addDebugInfo('fetchingCourse', { courseId });
 
     try {
-      // Test Firebase connection first
-      addDebugInfo('testingFirebase', 'Testing Firebase connection...');
-      
+      // Add timeout to prevent hanging
+      const timeoutId = setTimeout(() => {
+        throw new Error('Request timeout - Firebase connection may be slow');
+      }, 15000);
+
+      console.log('Fetching course with ID:', courseId);
       const docRef = doc(db, 'courses', courseId);
       addDebugInfo('docRef', docRef.path);
       
       const docSnap = await getDoc(docRef);
+      clearTimeout(timeoutId);
+      
       addDebugInfo('docSnapExists', docSnap.exists());
+      console.log('Document exists:', docSnap.exists());
 
       if (docSnap.exists()) {
         const data = docSnap.data();
         addDebugInfo('rawFirebaseData', data);
+        console.log('Raw course data:', data);
 
-        // Create course data with proper validation and defaults
         const courseData: Course = {
           id: docSnap.id,
           title: data.title || 'Untitled Course',
@@ -172,8 +185,10 @@ export default function CourseEnrollmentPage() {
 
         addDebugInfo('processedCourseData', courseData);
         setCourse(courseData);
+        console.log('Course set successfully:', courseData.title);
         addDebugInfo('courseSetSuccess', courseData.title);
       } else {
+        console.error('Course not found:', courseId);
         addDebugInfo('courseNotFound', courseId);
         setError('Course not found in database');
       }
@@ -181,14 +196,15 @@ export default function CourseEnrollmentPage() {
       addDebugInfo('fetchCourseError', {
         error: err,
         code: err.code,
-        message: err.message,
-        stack: err.stack
+        message: err.message
       });
       
       console.error('Error fetching course:', err);
       
       let errorMessage = 'Failed to load course';
-      if (err.code === 'permission-denied') {
+      if (err.message.includes('timeout')) {
+        errorMessage = 'Request timed out. Please check your connection and try again.';
+      } else if (err.code === 'permission-denied') {
         errorMessage = 'You do not have permission to access this course';
       } else if (err.code === 'not-found') {
         errorMessage = 'Course not found';
@@ -206,17 +222,17 @@ export default function CourseEnrollmentPage() {
 
   // Handle user authentication changes
   useEffect(() => {
-    addDebugInfo('authEffect', { authLoading, user: !!user });
+    addDebugInfo('authEffect', { authLoading, user: !!user, courseId });
     
     if (authLoading) return;
 
     if (!user) {
       addDebugInfo('noUser', 'Redirecting to login');
-      router.push(`/auth/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
       return;
     }
 
-    if (courseId && !enrollmentChecked.current) {
+    if (courseId && user) {
       checkEnrollmentStatus(user.uid, courseId);
     }
   }, [user, courseId, authLoading, router]);
@@ -231,7 +247,7 @@ export default function CourseEnrollmentPage() {
   // Handle enrollment
   const handleEnrollment = async () => {
     if (!user) {
-      router.push(`/auth/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
       return;
     }
 
@@ -311,20 +327,25 @@ export default function CourseEnrollmentPage() {
     if (process.env.NODE_ENV !== 'development') return null;
     
     return (
-      <div className="fixed bottom-4 left-4 bg-black bg-opacity-80 text-white p-4 rounded-lg text-xs max-w-sm max-h-60 overflow-auto z-50">
-        <h4 className="font-bold mb-2">Debug Info:</h4>
-        <pre className="whitespace-pre-wrap">
-          {JSON.stringify({
-            courseId,
-            authLoading,
-            user: user?.uid || 'No user',
-            loading,
-            error,
-            courseExists: !!course,
-            courseTitle: course?.title || 'No title',
-            ...debugInfo
-          }, null, 2)}
-        </pre>
+      <div className="fixed bottom-4 right-4 bg-black bg-opacity-90 text-white p-4 rounded-lg text-xs max-w-sm max-h-60 overflow-auto z-50">
+        <h4 className="font-bold mb-2">🐛 Debug Info:</h4>
+        <div className="space-y-1">
+          <p><strong>Course ID:</strong> {courseId || 'undefined'}</p>
+          <p><strong>Auth Loading:</strong> {authLoading ? 'Yes' : 'No'}</p>
+          <p><strong>User:</strong> {user?.uid || 'No user'}</p>
+          <p><strong>Loading:</strong> {loading ? 'Yes' : 'No'}</p>
+          <p><strong>Error:</strong> {error || 'None'}</p>
+          <p><strong>Course Exists:</strong> {course ? 'Yes' : 'No'}</p>
+          <p><strong>Course Title:</strong> {course?.title || 'No title'}</p>
+          <p><strong>Environment:</strong> {process.env.NODE_ENV}</p>
+          <p><strong>URL:</strong> {typeof window !== 'undefined' ? window.location.href : 'SSR'}</p>
+        </div>
+        <details className="mt-2">
+          <summary className="cursor-pointer font-bold">Full Debug Data</summary>
+          <pre className="text-xs mt-1 whitespace-pre-wrap">
+            {JSON.stringify(debugInfo, null, 2)}
+          </pre>
+        </details>
       </div>
     );
   };
@@ -340,6 +361,9 @@ export default function CourseEnrollmentPage() {
           </p>
           <div className="text-sm text-gray-500">
             Course ID: {courseId || 'Not found'}
+          </div>
+          <div className="text-xs text-gray-400">
+            Environment: {process.env.NODE_ENV}
           </div>
         </div>
         <DebugPanel />
@@ -361,6 +385,8 @@ export default function CourseEnrollmentPage() {
                 <strong>Error:</strong> {error}
                 <br />
                 <small>Course ID: {courseId}</small>
+                <br />
+                <small>Check console for more details</small>
               </div>
             </div>
           </div>
