@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 
 export function useDashboardCourses(userId: string | null) {
   const [courses, setCourses] = useState<Course[]>([]);

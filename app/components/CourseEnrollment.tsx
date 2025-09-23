@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 import { useTheme } from '@/context/ThemeContext';
 import Link from 'next/link';
 import { Clock, Users, Star, CheckCircle, PlayCircle, BookOpen, Award, Shield, Calendar, Globe, Download } from 'lucide-react';

@@ -5,34 +5,35 @@ import {
   updateDoc, 
   arrayUnion, 
   serverTimestamp,
-  collection,
-  query,
-  where,
-  getDocs
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { convertFromRaw, convertToRaw, EditorState } from 'draft-js';
+import { stateToHTML } from 'draft-js-export-html';
 
-interface Module {
+// Type definitions
+export type Lesson = {
+  id: string;
+  title: string;
+  description: string;
+  content: string;
+  rawContent: any;
+  type: string;
+  duration: number;
+  order: number;
+  moduleId: string;
+  completed: boolean;
+};
+
+export type Module = {
   id: string;
   title: string;
   description: string;
   order: number;
   lessons: Lesson[];
-}
+  rawContent: any;
+};
 
-interface Lesson {
-  id: string;
-  title: string;
-  description: string;
-  content: string;
-  type: 'video' | 'text' | 'quiz';
-  duration: number;
-  order: number;
-  moduleId: string;
-  completed: boolean;
-}
-
-interface Progress {
+export type Progress = {
   completedLessons: number;
   totalLessons: number;
   completedModules: number;
@@ -40,18 +41,85 @@ interface Progress {
   percentage: number;
   lastAccessedModule?: string;
   lastAccessedLesson?: string;
-}
+};
 
-interface UserEnrollment {
-  enrolledAt: any;
-  progress: number;
-  completedModules: string[];
-  completedLessons: string[];
+export type UserEnrollment = {
+  completedLessons?: string[];
+  completedModules?: string[];
   lastAccessedModule?: string;
   lastAccessedLesson?: string;
-  certificateEligible?: boolean;
-  certificateGenerated?: boolean;
-}
+  [key: string]: any;
+};
+
+// Helper function to convert Draft.js content to HTML for display
+const convertDraftContentToHTML = (content: any): string => {
+  if (!content) return '';
+  
+  try {
+    // If it's already a string, return it
+    if (typeof content === 'string') {
+      return content;
+    }
+    
+    // If it's Draft.js format with ops array
+    if (content.ops && Array.isArray(content.ops)) {
+      // Simple conversion - join all text inserts
+      return content.ops
+        .map((op: any) => op.insert || '')
+        .join('')
+        .replace(/\n/g, '<br>');
+    }
+    
+    // If it's proper Draft.js raw content state
+    if (content.blocks && Array.isArray(content.blocks)) {
+      const contentState = convertFromRaw(content);
+      return stateToHTML(contentState);
+    }
+    
+    // Fallback - try to extract any text content
+    return JSON.stringify(content);
+    
+  } catch (error) {
+    console.warn('Error converting content:', error);
+    return typeof content === 'string' ? content : '';
+  }
+};
+
+// Updated conversion function that preserves content structure
+const convertCourseModulesToLessons = (courseModules: any[]): Module[] => {
+  return courseModules.map((module, moduleIndex) => {
+    const lessons: Lesson[] = [];
+    
+    // Convert module content to lesson
+    if (module.content) {
+      const htmlContent = convertDraftContentToHTML(module.content);
+      
+      const lesson: Lesson = {
+        id: `${module.id}_lesson_1`,
+        title: module.title || `${module.title} - Content`,
+        description: `Main content for ${module.title}`,
+        content: htmlContent, // Now properly converted HTML
+        rawContent: module.content, // Keep original for editing
+        type: 'text',
+        duration: Math.max(5, Math.ceil(htmlContent.length / 200)),
+        order: 1,
+        moduleId: module.id,
+        completed: false
+      };
+      
+      lessons.push(lesson);
+    }
+    
+    return {
+      id: module.id,
+      title: module.title || `Module ${moduleIndex + 1}`,
+      description: module.description || `Content for module ${moduleIndex + 1}`,
+      order: moduleIndex + 1,
+      lessons,
+      rawContent: module.content // Keep original content
+    };
+  }).filter(module => module.lessons.length > 0);
+};
 
 export const useCourseContent = (
   courseId: string,
@@ -66,53 +134,6 @@ export const useCourseContent = (
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Helper function to convert course modules to lesson structure
-  const convertCourseModulesToLessons = (courseModules: any[]): Module[] => {
-    return courseModules.map((module, moduleIndex) => {
-      // Extract lessons from module content
-      const lessons: Lesson[] = [];
-      
-      // If module has content, convert it to lessons
-      if (module.content) {
-        let content = '';
-        
-        // Handle different content formats
-        if (typeof module.content === 'string') {
-          content = module.content;
-        } else if (module.content.ops) {
-          // Delta/Quill format
-          content = module.content.ops
-            .map((op: any) => op.insert || '')
-            .join('');
-        }
-        
-        // For now, create a single lesson per module
-        // In a real app, you might want to parse the content to create multiple lessons
-        const lesson: Lesson = {
-          id: `${module.id}_lesson_1`,
-          title: module.title || `${module.title} - Content`,
-          description: `Main content for ${module.title}`,
-          content: content,
-          type: 'text', // Default to text, could be determined by content analysis
-          duration: Math.max(5, Math.ceil(content.length / 200)), // Rough estimate: 200 chars per minute
-          order: 1,
-          moduleId: module.id,
-          completed: false
-        };
-        
-        lessons.push(lesson);
-      }
-      
-      return {
-        id: module.id,
-        title: module.title || `Module ${moduleIndex + 1}`,
-        description: module.description || `Content for module ${moduleIndex + 1}`,
-        order: moduleIndex + 1,
-        lessons
-      };
-    }).filter(module => module.lessons.length > 0); // Only include modules with lessons
-  };
-
   // Load course content and user progress
   useEffect(() => {
     if (!courseId) {
@@ -125,6 +146,8 @@ export const useCourseContent = (
       setError(null);
       
       try {
+        console.log('Loading course content for:', courseId);
+        
         // Fetch course data
         const courseDoc = await getDoc(doc(db, 'courses', courseId));
         
@@ -135,10 +158,21 @@ export const useCourseContent = (
         }
 
         const courseData = courseDoc.data();
-        const courseModules = courseData.modules || [];
+        console.log('Course data loaded:', courseData);
         
-        // Convert course modules to lesson structure
+        const courseModules = courseData.modules || [];
+        console.log('Course modules:', courseModules);
+        
+        if (courseModules.length === 0) {
+          console.warn('No modules found in course');
+          setError('No course content available');
+          setLoading(false);
+          return;
+        }
+        
+        // Convert course modules to lesson structure with proper content handling
         const convertedModules = convertCourseModulesToLessons(courseModules);
+        console.log('Converted modules:', convertedModules);
         
         // Load user enrollment and progress if user is logged in
         let enrollment: UserEnrollment | null = null;
@@ -150,6 +184,7 @@ export const useCourseContent = (
             
             if (enrollmentDoc.exists()) {
               enrollment = enrollmentDoc.data() as UserEnrollment;
+              console.log('User enrollment:', enrollment);
             }
           } catch (enrollmentError) {
             console.error('Error loading user enrollment:', enrollmentError);
@@ -181,6 +216,8 @@ export const useCourseContent = (
           lastAccessedLesson: enrollment?.lastAccessedLesson
         };
 
+        console.log('Setting modules and progress:', { updatedModules, progressData });
+        
         setModules(updatedModules);
         setUserEnrollment(enrollment);
         setProgress(progressData);
@@ -222,7 +259,6 @@ export const useCourseContent = (
     }
   }, [modules, moduleId, lessonId]);
 
-  // Mark lesson as complete
   const markLessonComplete = async (lessonId: string) => {
     if (!userId || !courseId) {
       console.warn('User not authenticated or course ID missing');
@@ -308,14 +344,13 @@ export const useCourseContent = (
     }
   };
 
-  // Get next lesson
+  // Rest of the hook remains the same...
   const getNextLesson = (currentLessonId: string): { module: Module, lesson: Lesson } | null => {
     for (let moduleIndex = 0; moduleIndex < modules.length; moduleIndex++) {
       const module = modules[moduleIndex];
       const lessonIndex = module.lessons.findIndex(l => l.id === currentLessonId);
       
       if (lessonIndex !== -1) {
-        // Next lesson in current module
         if (lessonIndex < module.lessons.length - 1) {
           return {
             module,
@@ -323,7 +358,6 @@ export const useCourseContent = (
           };
         }
         
-        // First lesson of next module
         if (moduleIndex < modules.length - 1) {
           const nextModule = modules[moduleIndex + 1];
           if (nextModule.lessons.length > 0) {
@@ -333,22 +367,18 @@ export const useCourseContent = (
             };
           }
         }
-        
         break;
       }
     }
-    
     return null;
   };
 
-  // Get previous lesson
   const getPreviousLesson = (currentLessonId: string): { module: Module, lesson: Lesson } | null => {
     for (let moduleIndex = 0; moduleIndex < modules.length; moduleIndex++) {
       const module = modules[moduleIndex];
       const lessonIndex = module.lessons.findIndex(l => l.id === currentLessonId);
       
       if (lessonIndex !== -1) {
-        // Previous lesson in current module
         if (lessonIndex > 0) {
           return {
             module,
@@ -356,7 +386,6 @@ export const useCourseContent = (
           };
         }
         
-        // Last lesson of previous module
         if (moduleIndex > 0) {
           const prevModule = modules[moduleIndex - 1];
           if (prevModule.lessons.length > 0) {
@@ -366,15 +395,12 @@ export const useCourseContent = (
             };
           }
         }
-        
         break;
       }
     }
-    
     return null;
   };
 
-  // Update last accessed lesson (for tracking user progress)
   const updateLastAccessed = async (lessonId: string, moduleId: string) => {
     if (!userId || !courseId) return;
 

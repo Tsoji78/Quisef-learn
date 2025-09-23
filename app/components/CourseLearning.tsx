@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { useCourseProgress } from '@/hooks/useCourseProgress';
-import { useModuleNavigation } from '@/ooks/useModuleNavigation';
+import { useModuleNavigation } from '@/hooks/useModuleNavigation';
 import { useCertificate } from '@/hooks/useCertificate';
 import { CourseSidebar } from '@/components/CourseSidebar';
 import { CourseTopNavigation } from '@/components/CourseTopNavigation';

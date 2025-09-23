@@ -1,6 +1,6 @@
 import React from 'react';
 import { BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Module } from '@/types/course';
+import { Module } from '@/types';
 
 interface CourseTopNavigationProps {
   currentModule: Module;

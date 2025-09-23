@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Module } from '@/types/course';
+import { Module } from '@/types';
 
 interface UseModuleNavigationProps {
   modules: Module[];

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 import CourseCard from './CourseCard';
 import Pagination from './Pagination';
 

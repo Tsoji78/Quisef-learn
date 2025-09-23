@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Save, X, Loader, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { ModuleList } from '@/components/ModulesList';
+import {ModuleList} from '@/components/ModulesList';
 import DraftEditor from './DraftEditor';
 import ThumbnailUploader from './ThumbnailUploader';
 import ProgressBar from './ProgressBar';
@@ -91,8 +91,8 @@ interface CourseFormProps {
   courseActions: CourseActions;
   draftEditorState: DraftEditorState;
   draftEditorActions: DraftEditorActions;
-  user: any; // Add this
-  courseId: string | null; // Add this
+  user: any;
+  courseId: string | null;
 }
 
 // Memoized sub-components
@@ -349,13 +349,39 @@ const ModulesSection = React.memo(({
     
     <div className="flex flex-col lg:flex-row gap-6">
       <div className="lg:w-1/3">
-        <ModuleList
-          modules={formData.modules}
-          currentModuleIndex={currentModuleIndex}
-          setCurrentModuleIndex={setCurrentModuleIndex}
-          addModule={addModule}
-          removeModule={removeModule}
-        />
+        <div className="space-y-4">
+          <ModuleList
+            modules={formData.modules}
+            currentModule={formData.modules[currentModuleIndex] || null}
+            completedModules={[]} // Add empty array or track completed modules
+            onModuleSelect={(module) => {
+              const moduleIndex = formData.modules.findIndex(m => m.id === module.id);
+              if (moduleIndex !== -1) {
+                setCurrentModuleIndex(moduleIndex);
+              }
+            }}
+          />
+          
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={addModule}
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors"
+              aria-label="Add new module"
+            >
+              Add Module
+            </button>
+            
+            {formData.modules.length > 0 && currentModuleIndex < formData.modules.length && (
+              <button
+                onClick={() => removeModule(currentModuleIndex)}
+                className="w-full bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded transition-colors"
+                aria-label="Remove current module"
+              >
+                Remove Current Module
+              </button>
+            )}
+          </div>
+        </div>
       </div>
       
       <div className="lg:w-2/3">
@@ -482,15 +508,15 @@ export default function CourseForm({
   courseActions,
   draftEditorState,
   draftEditorActions,
-  user, // Add this
+  user,
   courseId,
 }: CourseFormProps) {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
    // Add the draft manager hook
   const draftSaver = useDraftSaving({
-    user: user, // You'll need to pass user from CourseManagementPage
-    courseId: courseId, // You'll need to pass courseId from CourseManagementPage
+    user: user,
+    courseId: courseId,
     autoSaveInterval: 30000, // 30 seconds
     maxDraftVersions: 5,
   });
@@ -628,11 +654,11 @@ export default function CourseForm({
       </div>
 
       <DraftSaver
-      formData={formData}
-      user={user} // Pass user prop
-      courseId={courseId} // Pass courseId prop
-      draftEditorActions={draftEditorActions}
-      className="mb-6"
+        formData={formData}
+        user={user}
+        courseId={courseId}
+        draftEditorActions={draftEditorActions}
+        className="mb-6"
       />
 
       {errors.general && (

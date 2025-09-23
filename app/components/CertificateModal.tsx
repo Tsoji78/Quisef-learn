@@ -1,6 +1,6 @@
 import React from 'react';
 import { Award, Share2 } from 'lucide-react';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 
 interface CertificateModalProps {
   course: Course;

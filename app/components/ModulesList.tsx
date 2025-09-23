@@ -1,6 +1,6 @@
 import React from 'react';
 import { CheckCircle, Circle, BookOpen, Video, FileText } from 'lucide-react';
-import { Module } from '@/types/course';
+import { Module } from '@/types';
 
 interface ModuleListProps {
   modules: Module[];

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 import { useTheme } from '@/context/ThemeContext';
 import { useState } from 'react';
 

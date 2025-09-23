@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Course } from '@/types/course';
+import { Course } from '@/types';
 
 export function useCourseDetails(courseId: string, userId: string | null) {
   const [course, setCourse] = useState<Course | null>(null);

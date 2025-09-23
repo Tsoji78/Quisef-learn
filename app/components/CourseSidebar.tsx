@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { ArrowLeft, User, Clock } from 'lucide-react';
-import { Course, Module } from '@/types/course';
+import { Course, Module } from '@/types';
 import { ModuleList } from '@/components/ModulesList';
 
 interface CourseSidebarProps {

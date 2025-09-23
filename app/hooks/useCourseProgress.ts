@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Module } from '@/types/course';
+import { Module } from '@/types';
 
 interface UseCourseProgressProps {
   userId: string | undefined;

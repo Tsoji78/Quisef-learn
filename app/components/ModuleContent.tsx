@@ -1,7 +1,7 @@
 import React from 'react';
 import parse from 'html-react-parser';
 import { Download } from 'lucide-react';
-import { Module } from '@/types/course';
+import { Module } from '@/types';
 
 interface ModuleContentProps {
   module: Module;
