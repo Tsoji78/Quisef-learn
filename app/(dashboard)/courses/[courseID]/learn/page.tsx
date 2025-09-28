@@ -1,5 +1,4 @@
 'use client';
-
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useCourseDetails } from '@/hooks/useCourseDetails';
@@ -29,6 +28,9 @@ import {
   User,
   Calendar,
 } from 'lucide-react';
+
+export const dynamic = 'force-dynamic' // might cause issues
+
 
 interface Module {
   id: string;

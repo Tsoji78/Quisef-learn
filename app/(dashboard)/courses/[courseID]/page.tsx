@@ -9,6 +9,9 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import DebugPanel from '@/components/DebugPanel';
 import { useState, useEffect, useRef } from 'react';
+export const dynamic = 'force-dynamic' // might cause issues
+
+
 
 export default function CourseEnrollmentPage() {
   const params = useParams();
