@@ -9,10 +9,8 @@ const nextConfig = {
   reactStrictMode: true,
   trailingSlash: false,
   
-  // Ensure experimental features are enabled for App Router
-  experimental: {
-    serverComponentsExternalPackages: ['firebase-admin'],
-  },
+  // External packages for server components
+  serverExternalPackages: ['firebase-admin'],
   
   // Image optimization settings
   images: {

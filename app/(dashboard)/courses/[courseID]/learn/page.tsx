@@ -7,7 +7,7 @@ import { useCourseContent } from '@/hooks/useCourseContent';
 import { useCourseProgress } from '@/hooks/useCourseProgress';
 import { useModuleNavigation } from '@/hooks/useModuleNavigation';
 import { useCertificate } from '@/hooks/useCertificate';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { 
   ArrowLeft, 
@@ -24,12 +24,10 @@ import {
   Download,
   Share2,
   Trophy,
-  Star,
   X,
   Menu,
   User,
   Calendar,
-  BarChart3
 } from 'lucide-react';
 
 interface Module {
@@ -41,15 +39,16 @@ interface Module {
   content?: any;
   rawContent?: any;
   estimatedTime?: number;
+  [key: string]: any;
 }
 
 interface Lesson {
   id: string;
   title: string;
   description: string;
-  content: string; // HTML content for display
-  rawContent?: any; // Original Draft.js content
-  type: 'video' | 'text' | 'quiz';
+  content: string;
+  rawContent?: any;
+  type: string;
   duration: number;
   order: number;
   moduleId: string;
@@ -58,58 +57,115 @@ interface Lesson {
 
 // Helper function to render lesson content safely
 const renderLessonContent = (lesson: Lesson) => {
+  if (!lesson) {
+    return (
+      <div className="text-gray-500 dark:text-gray-400 italic p-4 bg-gray-50 dark:bg-gray-800 rounded">
+        No lesson data available.
+      </div>
+    );
+  }
+
+  // Try to extract content from rawContent if available
+  if (lesson.rawContent) {
+    try {
+      let content = lesson.rawContent;
+      
+      // Parse if it's a string
+      if (typeof content === 'string') {
+        try {
+          content = JSON.parse(content);
+        } catch {
+          return (
+            <div className="lesson-content prose dark:prose-invert max-w-none">
+              <p>{content}</p>
+            </div>
+          );
+        }
+      }
+      
+      // Handle Draft.js format with entities (this handles videos)
+      if (content.blocks && Array.isArray(content.blocks) && content.entityMap) {
+        const elements: React.ReactNode[] = [];
+        
+        content.blocks.forEach((block: any, blockIndex: number) => {
+          // Handle atomic blocks (videos, images, embeds)
+          if (block.type === 'atomic' && block.entityRanges?.length > 0) {
+            const entityKey = block.entityRanges[0].key.toString();
+            const entity = content.entityMap[entityKey];
+            
+            if (entity?.type === 'VIDEO') {
+              elements.push(
+                <div key={blockIndex} className="my-6">
+                  <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
+                    <video 
+                      src={entity.data.src || entity.data.url}
+                      controls
+                      className="w-full h-full"
+                      poster={entity.data.poster || entity.data.thumbnail}
+                    >
+                      <source src={entity.data.src || entity.data.url} type="video/mp4" />
+                      Your browser does not support the video tag.
+                    </video>
+                  </div>
+                </div>
+              );
+            } else if (entity?.type === 'IMAGE') {
+              elements.push(
+                <div key={blockIndex} className="my-4">
+                  <img 
+                    src={entity.data.src || entity.data.url} 
+                    alt={entity.data.alt || 'Image'} 
+                    className="max-w-full h-auto rounded-lg"
+                  />
+                </div>
+              );
+            }
+          } else if (block.text) {
+            // Regular text blocks
+            elements.push(
+              <p key={blockIndex} className="mb-4">
+                {block.text}
+              </p>
+            );
+          }
+        });
+        
+        return (
+          <div className="lesson-content prose dark:prose-invert max-w-none">
+            {elements}
+          </div>
+        );
+      }
+      
+      // Fallback to simple text extraction
+      if (content.blocks && Array.isArray(content.blocks)) {
+        const textContent = content.blocks
+          .map((block: { text?: string }) => block.text || '')
+          .join('<br>');
+        return (
+          <div 
+            className="lesson-content prose dark:prose-invert max-w-none"
+            dangerouslySetInnerHTML={{ __html: textContent }}
+          />
+        );
+      }
+      
+    } catch (error) {
+      console.warn('Error rendering raw content:', error);
+    }
+  }
+
   // If we have HTML content, render it safely
   if (lesson.content && typeof lesson.content === 'string') {
     return (
       <div 
         className="lesson-content prose dark:prose-invert max-w-none"
         dangerouslySetInnerHTML={{ __html: lesson.content }}
-        style={{
-          lineHeight: '1.6',
-          fontSize: '16px',
-        }}
       />
     );
   }
   
-  // Try to extract content from rawContent if available
-  if (lesson.rawContent) {
-    try {
-      let textContent = '';
-      
-      if (typeof lesson.rawContent === 'string') {
-        textContent = lesson.rawContent;
-      } else if (lesson.rawContent.ops && Array.isArray(lesson.rawContent.ops)) {
-        // Draft.js Delta format
-        textContent = lesson.rawContent.ops
-          .map((op: any) => op.insert || '')
-          .join('')
-          .replace(/\n/g, '<br>');
-      } else if (lesson.rawContent.blocks && Array.isArray(lesson.rawContent.blocks)) {
-        // Draft.js raw content state
-        textContent = lesson.rawContent.blocks
-          .map((block: any) => block.text || '')
-          .join('<br>');
-      }
-      
-      if (textContent) {
-        return (
-          <div 
-            className="lesson-content prose dark:prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: textContent }}
-            style={{
-              lineHeight: '1.6',
-              fontSize: '16px',
-            }}
-          />
-        );
-      }
-    } catch (error) {
-      console.warn('Error rendering raw content:', error);
-    }
-  }
-  
-  // Fallback for empty or invalid content
+  // Fallback
   return (
     <div className="text-gray-500 dark:text-gray-400 italic p-4 bg-gray-50 dark:bg-gray-800 rounded">
       No content available for this lesson.
@@ -151,7 +207,6 @@ const CertificateModal = ({
         </div>
         
         <div className="p-6">
-          {/* Certificate Preview */}
           <div className="border-4 border-yellow-400 bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 p-8 text-center rounded-lg mb-6">
             <div className="mb-4">
               <Trophy className="mx-auto text-yellow-600 mb-4" size={48} />
@@ -181,7 +236,6 @@ const CertificateModal = ({
             </div>
           </div>
           
-          {/* Action Buttons */}
           <div className="flex space-x-4">
             <button
               onClick={onDownload}
@@ -222,7 +276,7 @@ const CertificateBanner = ({
         <div className="flex items-center">
           <Trophy size={24} className="mr-2 flex-shrink-0" />
           <div>
-            <h4 className="font-bold">Congratulations! 🎉</h4>
+            <h4 className="font-bold">Congratulations!</h4>
             <p className="text-sm opacity-90">You've earned a certificate!</p>
           </div>
         </div>
@@ -298,35 +352,81 @@ const ModuleCompletionCard = ({
   );
 };
 
-export default function CourseLearnPage() {
+// Error Boundary Component
+const ErrorBoundary = ({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) => {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    const handleError = (error: ErrorEvent) => {
+      console.error('Error caught by error boundary:', error);
+      setHasError(true);
+    };
+
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
+  if (hasError) {
+    return <>{fallback}</>;
+  }
+
+  return <>{children}</>;
+};
+
+// Loading Component
+const LoadingSpinner = ({ message = "Loading..." }: { message?: string }) => (
+  <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+    <div className="flex flex-col items-center space-y-4">
+      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      <p className="text-gray-600 dark:text-gray-400">{message}</p>
+    </div>
+  </div>
+);
+
+// Main Component wrapped in Suspense
+function CourseLearnPageContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   
-  const courseId = params?.courseId as string;
-  const moduleId = searchParams?.get('module');
-  const lessonId = searchParams?.get('lesson');
+  // Safely get parameters with fallbacks
+  const courseId = (params?.courseId as string) || '';
+  const moduleId = searchParams?.get('module') || null;
+  const lessonId = searchParams?.get('lesson') || null;
   
   const { course, isEnrolled, loading: courseLoading, error } = useCourseDetails(courseId, user?.uid || null);
-  const { modules, currentLesson, progress, loading: contentLoading, markLessonComplete } = useCourseContent(
+  
+  // Only initialize content hooks if we have required data
+  const { 
+    modules, 
+    currentLesson, 
+    progress, 
+    loading: contentLoading, 
+    markLessonComplete,
+    error: contentError 
+  } = useCourseContent(
     courseId, 
-    user?.uid || null,
+    user?.uid ?? null,
     moduleId,
     lessonId
   );
   
-  // Enhanced hooks for course completion and certification
+  // Initialize other hooks with safer defaults
   const { 
-    completedModules, 
-    currentProgress, 
+    completedModules = [], 
+    currentProgress = 0, 
     loading: progressLoading, 
     markModuleComplete 
   } = useCourseProgress({ 
     userId: user?.uid, 
     courseId: courseId, 
-    modules: modules || [],
-    initialProgress: typeof progress === 'number' ? progress : progress?.percentage ?? undefined
+    modules: (modules || []).map((m: any) => ({
+      ...m,
+      content: m.content ?? '',
+      type: m.type ?? 'text',
+    })),
+    initialProgress: typeof progress === 'number' ? progress : progress?.percentage ?? 0
   });
 
   const {
@@ -342,52 +442,57 @@ export default function CourseLearnPage() {
   });
 
   const {
-    certificateGenerated,
-    setCertificateGenerated,
-    showCertificateModal,
-    setShowCertificateModal,
-    downloadCertificate,
-    shareCertificate
-  } = useCertificate({ 
+    certificateGenerated = false,
+    setCertificateGenerated = () => {},
+    showCertificateModal = false,
+    setShowCertificateModal = () => {},
+    downloadCertificate = () => {},
+    shareCertificate = () => {}
+  } = useCertificate?.({ 
     userId: user?.uid, 
     course, 
     currentProgress 
-  });
+  }) || {};
   
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
 
-  // Initialize expanded modules and selected content
+  // Initialize expanded modules and selected content with error handling
   useEffect(() => {
-    if (modules.length > 0) {
-      // If no module/lesson specified, select first lesson of first module
-      if (!moduleId && !lessonId) {
-        const firstModule = modules[0];
-        const firstLesson = firstModule?.lessons?.[0];
-        if (firstModule && firstLesson) {
-          router.replace(`/courses/${courseId}/learn?module=${firstModule.id}&lesson=${firstLesson.id}`);
-          return;
+    try {
+      if (modules && modules.length > 0) {
+        // If no module/lesson specified, select first lesson of first module
+        if (!moduleId && !lessonId && router) {
+          const firstModule = modules[0];
+          const firstLesson = firstModule?.lessons?.[0];
+          if (firstModule && firstLesson) {
+            router.replace(`/courses/${courseId}/learn?module=${firstModule.id}&lesson=${firstLesson.id}`);
+            return;
+          }
         }
-      }
 
-      // Set expanded modules
-      const expanded = new Set<string>();
-      if (moduleId) {
-        expanded.add(moduleId);
-      } else {
-        // Expand first module by default
-        expanded.add(modules[0]?.id);
-      }
-      setExpandedModules(expanded);
+        // Set expanded modules
+        const expanded = new Set<string>();
+        if (moduleId) {
+          expanded.add(moduleId);
+        } else if (modules[0]?.id) {
+          expanded.add(modules[0].id);
+        }
+        setExpandedModules(expanded);
 
-      // Set selected module and lesson
-      const module = modules.find(m => m.id === moduleId) || modules[0];
-      const lesson = module?.lessons?.find(l => l.id === lessonId) || module?.lessons?.[0];
-      
-      setSelectedModule(module || null);
-      setSelectedLesson(lesson || null);
+        // Set selected module and lesson
+        const module = modules.find(m => m.id === moduleId) || modules[0];
+        const lesson = module?.lessons?.find(l => l.id === lessonId) || module?.lessons?.[0];
+        
+        setSelectedModule(module || null);
+        setSelectedLesson(lesson || null);
+      }
+    } catch (err) {
+      console.error('Error initializing course content:', err);
+      setInitializationError('Failed to initialize course content');
     }
   }, [modules, moduleId, lessonId, courseId, router]);
 
@@ -404,115 +509,145 @@ export default function CourseLearnPage() {
   };
 
   const selectLesson = (module: Module, lesson: Lesson) => {
-    setSelectedModule(module);
-    setSelectedLesson(lesson);
-    router.push(`/courses/${courseId}/learn?module=${module.id}&lesson=${lesson.id}`);
+    try {
+      setSelectedModule(module);
+      setSelectedLesson(lesson);
+      if (router) {
+        router.push(`/courses/${courseId}/learn?module=${module.id}&lesson=${lesson.id}`);
+      }
+    } catch (err) {
+      console.error('Error selecting lesson:', err);
+    }
   };
 
   const getNextLesson = () => {
-    if (!selectedModule || !selectedLesson) return null;
+    if (!selectedModule || !selectedLesson || !modules) return null;
     
-    const currentModuleIndex = modules.findIndex(m => m.id === selectedModule.id);
-    const currentLessonIndex = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
-    
-    // Next lesson in current module
-    if (currentLessonIndex < selectedModule.lessons.length - 1) {
-      return {
-        module: selectedModule,
-        lesson: selectedModule.lessons[currentLessonIndex + 1]
-      };
-    }
-    
-    // First lesson of next module
-    if (currentModuleIndex < modules.length - 1) {
-      const nextModule = modules[currentModuleIndex + 1];
-      return {
-        module: nextModule,
-        lesson: nextModule.lessons[0]
-      };
+    try {
+      const currentModuleIndex = modules.findIndex(m => m.id === selectedModule.id);
+      const currentLessonIndex = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
+      
+      // Next lesson in current module
+      if (currentLessonIndex < selectedModule.lessons.length - 1) {
+        return {
+          module: selectedModule,
+          lesson: selectedModule.lessons[currentLessonIndex + 1]
+        };
+      }
+      
+      // First lesson of next module
+      if (currentModuleIndex < modules.length - 1) {
+        const nextModule = modules[currentModuleIndex + 1];
+        if (nextModule.lessons && nextModule.lessons.length > 0) {
+          return {
+            module: nextModule,
+            lesson: nextModule.lessons[0]
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Error getting next lesson:', err);
     }
     
     return null;
   };
 
   const getPrevLesson = () => {
-    if (!selectedModule || !selectedLesson) return null;
+    if (!selectedModule || !selectedLesson || !modules) return null;
     
-    const currentModuleIndex = modules.findIndex(m => m.id === selectedModule.id);
-    const currentLessonIndex = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
-    
-    // Previous lesson in current module
-    if (currentLessonIndex > 0) {
-      return {
-        module: selectedModule,
-        lesson: selectedModule.lessons[currentLessonIndex - 1]
-      };
-    }
-    
-    // Last lesson of previous module
-    if (currentModuleIndex > 0) {
-      const prevModule = modules[currentModuleIndex - 1];
-      return {
-        module: prevModule,
-        lesson: prevModule.lessons[prevModule.lessons.length - 1]
-      };
+    try {
+      const currentModuleIndex = modules.findIndex(m => m.id === selectedModule.id);
+      const currentLessonIndex = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
+      
+      // Previous lesson in current module
+      if (currentLessonIndex > 0) {
+        return {
+          module: selectedModule,
+          lesson: selectedModule.lessons[currentLessonIndex - 1]
+        };
+      }
+      
+      // Last lesson of previous module
+      if (currentModuleIndex > 0) {
+        const prevModule = modules[currentModuleIndex - 1];
+        if (prevModule.lessons && prevModule.lessons.length > 0) {
+          return {
+            module: prevModule,
+            lesson: prevModule.lessons[prevModule.lessons.length - 1]
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Error getting previous lesson:', err);
     }
     
     return null;
   };
 
   const handleMarkComplete = async () => {
-    if (selectedLesson && user?.uid) {
-      await markLessonComplete(selectedLesson.id);
-      
-      // Check if all lessons in current module are completed
-      const allLessonsCompleted = selectedModule?.lessons.every(lesson => 
-        lesson.id === selectedLesson.id || lesson.completed
-      );
-      
-      // If module is completed, mark it as complete
-      if (allLessonsCompleted && selectedModule) {
-        await handleModuleComplete(selectedModule);
-      }
-      
-      // Auto-navigate to next lesson after marking complete
-      const nextLesson = getNextLesson();
-      if (nextLesson) {
-        setTimeout(() => {
-          selectLesson(nextLesson.module, nextLesson.lesson);
-        }, 1000);
+    if (selectedLesson && user?.uid && markLessonComplete) {
+      try {
+        await markLessonComplete(selectedLesson.id);
+        
+        // Check if all lessons in current module are completed
+        const allLessonsCompleted = selectedModule?.lessons.every(lesson => 
+          lesson.id === selectedLesson.id || lesson.completed
+        );
+        
+        // If module is completed, mark it as complete
+        if (allLessonsCompleted && selectedModule) {
+          await handleModuleComplete(selectedModule);
+        }
+        
+        // Auto-navigate to next lesson after marking complete
+        const nextLesson = getNextLesson();
+        if (nextLesson) {
+          setTimeout(() => {
+            selectLesson(nextLesson.module, nextLesson.lesson);
+          }, 1000);
+        }
+      } catch (err) {
+        console.error('Error marking lesson complete:', err);
       }
     }
   };
 
-  // Handle module completion with auto-navigation and certificate check
   const handleModuleComplete = async (module: Module) => {
-    // Ensure 'type' property exists for compatibility with imported Module type
-    const moduleWithType = {
-      ...module,
-      type: (module as any).type || 'text', // fallback to 'text' if not present
-      content: (module as any).content || '', // fallback to empty string if not present
-    };
-    await markModuleComplete(moduleWithType);
+    if (!markModuleComplete) return;
     
-    // Check if all modules are completed for certificate generation
-    const totalModules = modules.length;
-    const completedCount = completedModules.length + 1; // +1 for the module being completed now
-    
-    if (completedCount === totalModules && currentProgress >= 95) {
-      // Generate certificate
-      setCertificateGenerated(true);
-      setTimeout(() => setShowCertificateModal(true), 2000);
-    }
-    
-    if (nextModule) {
-      setTimeout(() => {
-        navigateToModule(nextModule);
-      }, 1000);
+    try {
+      const moduleWithType: Module = {
+        ...module,
+        type: (module as any).type || 'text',
+        content: (module as any).content || '',
+        lessons: (module.lessons || []).map((lesson: any) => ({
+          ...lesson,
+          type: (['video', 'text', 'quiz'].includes(lesson.type) ? lesson.type : 'text') as 'video' | 'text' | 'quiz',
+        })),
+      };
+      await markModuleComplete(moduleWithType);
+      
+      // Check if all modules are completed for certificate generation
+      const totalModules = modules?.length || 0;
+      const completedCount = completedModules.length + 1;
+      
+      if (completedCount === totalModules && currentProgress >= 95) {
+        setCertificateGenerated(true);
+        setTimeout(() => setShowCertificateModal(true), 2000);
+      }
+      
+      if (nextModule && navigateToModule) {
+        setTimeout(() => {
+          navigateToModule(nextModule);
+        }, 1000);
+      }
+    } catch (err) {
+      console.error('Error completing module:', err);
     }
   };
 
   const formatDuration = (minutes: number) => {
+    if (!minutes || minutes < 0) return '0m';
     if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -530,17 +665,12 @@ export default function CourseLearnPage() {
     }
   };
 
+  // Show loading state
   if (authLoading || courseLoading || contentLoading) {
-    return (
-      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading course content...</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading course content..." />;
   }
 
+  // Show authentication required
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
@@ -562,7 +692,8 @@ export default function CourseLearnPage() {
     );
   }
 
-  if (error || !course) {
+  // Show error state
+  if (error || contentError || initializationError || !course) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 py-8">
         <div className="container mx-auto px-4">
@@ -572,7 +703,7 @@ export default function CourseLearnPage() {
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
               <div>
-                <strong>Error:</strong> {error || 'Course not found'}
+                <strong>Error:</strong> {error || contentError || initializationError || 'Course not found'}
               </div>
             </div>
           </div>
@@ -588,6 +719,7 @@ export default function CourseLearnPage() {
     );
   }
 
+  // Show enrollment required
   if (!isEnrolled) {
     return (
       <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
@@ -603,6 +735,29 @@ export default function CourseLearnPage() {
             className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
           >
             View Course Details
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Show no content state
+  if (!modules || modules.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+        <div className="text-center">
+          <BookOpen size={48} className="text-gray-400 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
+            No Course Content
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            This course doesn't have any content yet. Please check back later.
+          </p>
+          <Link
+            href={`/courses/${courseId}`}
+            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Back to Course
           </Link>
         </div>
       </div>
@@ -634,7 +789,7 @@ export default function CourseLearnPage() {
           </div>
           
           <h1 className="text-lg font-semibold text-gray-800 dark:text-white mb-2">
-            {course.title}
+            {course?.title || 'Course'}
           </h1>
           
           {/* Enhanced Progress Display */}
@@ -670,8 +825,8 @@ export default function CourseLearnPage() {
           </div>
 
           <div className="space-y-2">
-            {modules.map((module) => (
-              <div key={module.id} className="border border-gray-200 dark:border-gray-700 rounded-lg">
+            {modules.map((module, index) => (
+              <div key={module.id || index} className="border border-gray-200 dark:border-gray-700 rounded-lg">
                 <button
                   onClick={() => toggleModule(module.id)}
                   className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
@@ -684,7 +839,7 @@ export default function CourseLearnPage() {
                     )}
                     <div className="flex-1">
                       <h4 className="font-medium text-gray-800 dark:text-white text-sm">
-                        {module.title}
+                        {module.title || `Module ${index + 1}`}
                       </h4>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                         {module.lessons?.length || 0} lessons
@@ -700,38 +855,40 @@ export default function CourseLearnPage() {
                 
                 {expandedModules.has(module.id) && (
                   <div className="border-t border-gray-200 dark:border-gray-700">
-                    {module.lessons?.map((lesson) => (
-                      <button
-                        key={lesson.id}
-                        onClick={() => selectLesson(module, lesson)}
-                        className={`w-full flex items-center p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
-                          selectedLesson?.id === lesson.id 
-                            ? 'bg-blue-50 dark:bg-blue-900/20 border-r-2 border-blue-600' 
-                            : ''
-                        }`}
-                      >
-                        <div className="flex items-center space-x-3 flex-1">
-                          {lesson.completed ? (
-                            <CheckCircle size={16} className="text-green-500 flex-shrink-0" />
-                          ) : (
-                            <div className="flex-shrink-0">
-                              {getLessonIcon(lesson)}
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                              {lesson.title}
-                            </p>
-                            <div className="flex items-center space-x-2 mt-1">
-                              <Clock size={12} className="text-gray-400" />
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                {formatDuration(lesson.duration)}
-                              </span>
+                    {module.lessons && module.lessons.length > 0 ? (
+                      module.lessons.map((lesson, lessonIndex) => (
+                        <button
+                          key={lesson.id || lessonIndex}
+                          onClick={() => selectLesson(module, lesson)}
+                          className={`w-full flex items-center p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
+                            selectedLesson?.id === lesson.id 
+                              ? 'bg-blue-50 dark:bg-blue-900/20 border-r-2 border-blue-600' 
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3 flex-1">
+                            {lesson.completed ? (
+                              <CheckCircle size={16} className="text-green-500 flex-shrink-0" />
+                            ) : (
+                              <div className="flex-shrink-0">
+                                {getLessonIcon(lesson)}
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                {lesson.title || `Lesson ${lessonIndex + 1}`}
+                              </p>
+                              <div className="flex items-center space-x-2 mt-1">
+                                <Clock size={12} className="text-gray-400" />
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {formatDuration(lesson.duration)}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </button>
-                    )) || (
+                        </button>
+                      ))
+                    ) : (
                       <div className="p-3 text-center text-sm text-gray-500 dark:text-gray-400">
                         No lessons available
                       </div>
@@ -760,7 +917,7 @@ export default function CourseLearnPage() {
               {selectedModule && (
                 <div>
                   <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-                    {selectedModule.title}
+                    {selectedModule.title || 'Module'}
                   </h2>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     Module {currentModuleIndex + 1} of {modules.length}
@@ -805,7 +962,7 @@ export default function CourseLearnPage() {
                       {getLessonIcon(selectedLesson)}
                       <div>
                         <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-                          {selectedLesson.title}
+                          {selectedLesson.title || 'Lesson'}
                         </h2>
                         <p className="text-gray-600 dark:text-gray-400 mt-1">
                           {selectedModule?.title} • {formatDuration(selectedLesson.duration)}
@@ -846,27 +1003,6 @@ export default function CourseLearnPage() {
                   
                   {/* Updated content rendering using the helper function */}
                   {renderLessonContent(selectedLesson)}
-                  
-                  {/* Add debugging information in development */}
-                  {process.env.NODE_ENV === 'development' && (
-                    <details className="mt-8 p-4 bg-gray-100 dark:bg-gray-800 rounded">
-                      <summary className="cursor-pointer font-medium">Debug Info</summary>
-                      <pre className="mt-2 text-xs overflow-auto max-h-40">
-                        <strong>Lesson Data:</strong>
-                        {JSON.stringify(selectedLesson, null, 2)}
-                      </pre>
-                      {selectedLesson?.rawContent && (
-                        <pre className="mt-2 text-xs overflow-auto max-h-40">
-                          <strong>Raw Content:</strong>
-                          {JSON.stringify(selectedLesson.rawContent, null, 2)}
-                        </pre>
-                      )}
-                      <div className="mt-2 text-xs">
-                        <strong>Modules Count:</strong> {modules.length}<br />
-                        <strong>Current Module Lessons:</strong> {selectedModule?.lessons?.length || 0}
-                      </div>
-                    </details>
-                  )}
                 </div>
 
                 {/* Module Completion Card */}
@@ -890,7 +1026,7 @@ export default function CourseLearnPage() {
                         className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 transition-colors"
                       >
                         <ArrowLeft size={16} className="mr-2" />
-                        Previous: {prevLesson.lesson.title}
+                        Previous: {prevLesson.lesson.title || 'Previous lesson'}
                       </button>
                     )}
                   </div>
@@ -901,7 +1037,7 @@ export default function CourseLearnPage() {
                         onClick={() => selectLesson(nextLesson.module, nextLesson.lesson)}
                         className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 transition-colors"
                       >
-                        Next: {nextLesson.lesson.title}
+                        Next: {nextLesson.lesson.title || 'Next lesson'}
                         <ArrowRight size={16} className="ml-2" />
                       </button>
                     )}
@@ -917,14 +1053,6 @@ export default function CourseLearnPage() {
                 <p className="text-gray-600 dark:text-gray-400">
                   Choose a lesson from the sidebar to start learning.
                 </p>
-                {process.env.NODE_ENV === 'development' && (
-                  <div className="mt-4 text-sm text-gray-500">
-                    <p>Debug: {modules.length} modules loaded</p>
-                    {modules.length === 0 && (
-                      <p className="text-red-500">No modules found - check your course data</p>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -932,21 +1060,55 @@ export default function CourseLearnPage() {
       </div>
 
       {/* Certificate Modal */}
-      <CertificateModal
-        course={course}
-        user={user}
-        isOpen={showCertificateModal}
-        onClose={() => setShowCertificateModal(false)}
-        onDownload={downloadCertificate}
-        onShare={shareCertificate}
-      />
+      {showCertificateModal && (
+        <CertificateModal
+          course={course}
+          user={user}
+          isOpen={showCertificateModal}
+          onClose={() => setShowCertificateModal(false)}
+          onDownload={downloadCertificate}
+          onShare={shareCertificate}
+        />
+      )}
 
       {/* Certificate Banner */}
-      <CertificateBanner
-        isVisible={certificateGenerated && currentProgress === 100}
-        onViewCertificate={() => setShowCertificateModal(true)}
-        onClose={() => setCertificateGenerated(false)}
-      />
+      {certificateGenerated && currentProgress === 100 && (
+        <CertificateBanner
+          isVisible={true}
+          onViewCertificate={() => setShowCertificateModal(true)}
+          onClose={() => setCertificateGenerated(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// Main export wrapped in Suspense boundary
+export default function CourseLearnPage() {
+  return (
+    <ErrorBoundary
+      fallback={
+        <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
+              Something went wrong
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Please try refreshing the page or go back to courses.
+            </p>
+            <Link
+              href="/courses"
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Back to Courses
+            </Link>
+          </div>
+        </div>
+      }
+    >
+      <Suspense fallback={<LoadingSpinner message="Loading course..." />}>
+        <CourseLearnPageContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
