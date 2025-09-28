@@ -1,4 +1,5 @@
 'use client';
+
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useCourseDetails } from '@/hooks/useCourseDetails';
@@ -29,9 +30,6 @@ import {
   Calendar,
 } from 'lucide-react';
 
-export const dynamic = 'force-dynamic' // might cause issues
-
-
 interface Module {
   id: string;
   title: string;
@@ -55,6 +53,64 @@ interface Lesson {
   order: number;
   moduleId: string;
   completed: boolean;
+}
+
+// Error Boundary Component
+function ErrorBoundary({ children }: { children: React.ReactNode }) {
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  if (hasError) {
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+        <div className="text-center p-8">
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
+          <p className="text-gray-600 mb-4">
+            {error?.message || 'An error occurred while loading the course content.'}
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button 
+              onClick={() => {
+                setHasError(false);
+                setError(null);
+                window.location.reload();
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            >
+              Try Again
+            </button>
+            <Link
+              href="/courses"
+              className="flex items-center text-blue-600 hover:text-blue-800 px-4 py-2 border border-blue-600 rounded hover:bg-blue-50"
+            >
+              <ArrowLeft size={18} className="mr-2" />
+              Back to Courses
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  try {
+    return <>{children}</>;
+  } catch (err) {
+    setHasError(true);
+    setError(err instanceof Error ? err : new Error('Unknown error'));
+    return null;
+  }
+}
+
+// Loading Component
+function LoadingSpinner({ message = "Loading..." }: { message?: string }) {
+  return (
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+      <div className="flex flex-col items-center space-y-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <p className="text-gray-600 dark:text-gray-400">{message}</p>
+      </div>
+    </div>
+  );
 }
 
 // Helper function to render lesson content safely
@@ -354,38 +410,7 @@ const ModuleCompletionCard = ({
   );
 };
 
-// Error Boundary Component
-const ErrorBoundary = ({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) => {
-  const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    const handleError = (error: ErrorEvent) => {
-      console.error('Error caught by error boundary:', error);
-      setHasError(true);
-    };
-
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
-  }, []);
-
-  if (hasError) {
-    return <>{fallback}</>;
-  }
-
-  return <>{children}</>;
-};
-
-// Loading Component
-const LoadingSpinner = ({ message = "Loading..." }: { message?: string }) => (
-  <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
-    <div className="flex flex-col items-center space-y-4">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      <p className="text-gray-600 dark:text-gray-400">{message}</p>
-    </div>
-  </div>
-);
-
-// Main Component wrapped in Suspense
+// Main Course Learn Component
 function CourseLearnPageContent() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -1085,29 +1110,10 @@ function CourseLearnPageContent() {
   );
 }
 
-// Main export wrapped in Suspense boundary
+// Main export wrapped in Suspense and Error Boundary
 export default function CourseLearnPage() {
   return (
-    <ErrorBoundary
-      fallback={
-        <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-              Something went wrong
-            </h2>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Please try refreshing the page or go back to courses.
-            </p>
-            <Link
-              href="/courses"
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Back to Courses
-            </Link>
-          </div>
-        </div>
-      }
-    >
+    <ErrorBoundary>
       <Suspense fallback={<LoadingSpinner message="Loading course..." />}>
         <CourseLearnPageContent />
       </Suspense>

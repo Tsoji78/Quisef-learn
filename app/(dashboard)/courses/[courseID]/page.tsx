@@ -8,12 +8,68 @@ import CourseEnrollment from '@/components/CourseEnrollment';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import DebugPanel from '@/components/DebugPanel';
-import { useState, useEffect, useRef } from 'react';
-export const dynamic = 'force-dynamic' // might cause issues
+import { useState, useEffect, useRef, Suspense } from 'react';
 
+// Error Boundary Component
+function ErrorBoundary({ children }: { children: React.ReactNode }) {
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
 
+  if (hasError) {
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+        <div className="text-center p-8">
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
+          <p className="text-gray-600 mb-4">
+            {error?.message || 'An error occurred while loading the course enrollment page.'}
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button 
+              onClick={() => {
+                setHasError(false);
+                setError(null);
+                window.location.reload();
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            >
+              Try Again
+            </button>
+            <Link
+              href="/courses"
+              className="flex items-center text-blue-600 hover:text-blue-800 px-4 py-2 border border-blue-600 rounded hover:bg-blue-50"
+            >
+              <ArrowLeft size={18} className="mr-2" />
+              Back to Courses
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-export default function CourseEnrollmentPage() {
+  try {
+    return <>{children}</>;
+  } catch (err) {
+    setHasError(true);
+    setError(err instanceof Error ? err : new Error('Unknown error'));
+    return null;
+  }
+}
+
+// Loading Component
+function LoadingSpinner({ message = 'Loading...' }: { message?: string }) {
+  return (
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+      <div className="flex flex-col items-center space-y-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <p className="text-gray-600 dark:text-gray-400">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+// Main Course Enrollment Component
+function CourseEnrollmentPageContent() {
   const params = useParams();
   const { user, loading: authLoading } = useAuth();
   const courseId = params?.courseId as string;
@@ -43,6 +99,7 @@ export default function CourseEnrollmentPage() {
       error,
       courseExists: !!course,
       courseTitle: course?.title || 'No title',
+      enrollmentError,
     };
 
     setDebugInfo((prev) => {
@@ -53,7 +110,7 @@ export default function CourseEnrollmentPage() {
       console.log('No debugInfo update needed');
       return prev;
     });
-  }, [courseId, authLoading, user?.uid, loading, error, course]);
+  }, [courseId, authLoading, user?.uid, loading, error, course, enrollmentError]);
 
   if (loading || authLoading) {
     return (
@@ -84,7 +141,7 @@ export default function CourseEnrollmentPage() {
                 />
               </svg>
               <div>
-                <strong>Error:</strong> {error || 'Course not found'}
+                <strong>Error:</strong> {error || enrollmentError || 'Course not found'}
                 <br />
                 <small>Course ID: {courseId}</small>
               </div>
@@ -138,5 +195,16 @@ export default function CourseEnrollmentPage() {
       </div>
       <DebugPanel debugInfo={debugInfo} />
     </div>
+  );
+}
+
+// Main Export with Suspense and Error Boundary
+export default function CourseEnrollmentPage() {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<LoadingSpinner message="Loading course enrollment..." />}>
+        <CourseEnrollmentPageContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
