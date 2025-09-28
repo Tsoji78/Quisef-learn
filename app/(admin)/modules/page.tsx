@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCourses } from '@/hooks/useCourses';
 import CourseList from '@/components/CourseList';
 
+
 export default function AdminCoursesPage() {
   const { user, loading: authLoading } = useAuth();
   const { courses, loading: coursesLoading, error, deleteCourse } = useCourses(user);
