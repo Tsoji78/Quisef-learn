@@ -11,9 +11,6 @@ export function middleware(request: NextRequest) {
     '/',
     '/about',
     '/catalogue',
-    '/modules',           // Add this
-    '/modules/addcourse', // Add this
-    '/courses',
     
     // Add other public routes if necessary
   ];
@@ -37,5 +34,5 @@ export function middleware(request: NextRequest) {
 
 // Apply middleware to all routes except the specified public paths
 export const config = {
-  matcher: ['//:path*'], // Adjust based on your needs
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)']
 };
