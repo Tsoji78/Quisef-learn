@@ -9,6 +9,9 @@ import CourseForm from '@/components/CourseForm';
 import { Loader } from 'lucide-react';
 import { Editor, EditorState, ContentBlock } from 'draft-js';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // Interface definitions
 interface CourseActions {
   handleInputChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
