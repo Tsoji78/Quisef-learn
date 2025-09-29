@@ -34,5 +34,5 @@ export function middleware(request: NextRequest) {
 
 // Apply middleware to all routes except the specified public paths
 export const config = {
-  matcher: ['//:path*'], // Adjust based on your needs
+  matcher: ['/:path*'], // Adjust based on your needs
 };
