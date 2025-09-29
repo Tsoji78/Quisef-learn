@@ -10,6 +10,8 @@ import { ArrowLeft } from 'lucide-react';
 import DebugPanel from '@/components/DebugPanel';
 import { useState, useEffect, useRef, Suspense } from 'react';
 
+
+
 // Error Boundary Component
 function ErrorBoundary({ children }: { children: React.ReactNode }) {
   const [hasError, setHasError] = useState(false);
