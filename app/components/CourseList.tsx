@@ -94,7 +94,7 @@ export default function CourseList({ courses, loading, error, deleteCourse }: Co
             />
             <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
           </div>
-          <Link href="/modules/addcourse">
+          <Link href="/addcourse">
             <button className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
               <Plus size={18} />
               <span>Add Course</span>
@@ -139,7 +139,7 @@ export default function CourseList({ courses, loading, error, deleteCourse }: Co
                         />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <Link href={`/modules/addcourse?id=${course.id}`}>
+                        <Link href={`/addcourse?id=${course.id}`}>
                           <div className="text-sm font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 cursor-pointer">
                             {course.title}
                           </div>
@@ -163,7 +163,7 @@ export default function CourseList({ courses, loading, error, deleteCourse }: Co
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{course.duration}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <div className="flex space-x-2">
-                          <Link href={`/modules/addcourse?id=${course.id}`}>
+                          <Link href={`/addcourse?id=${course.id}`}>
                             <button className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
                               <Pencil size={18} />
                             </button>
