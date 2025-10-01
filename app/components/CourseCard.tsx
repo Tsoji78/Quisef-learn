@@ -101,7 +101,7 @@ export default function CourseCard({ course, isEnrolled, userId }: CourseCardPro
         {/* Content Section */}
         <div className="p-5 flex-1 flex flex-col">
           {/* Title */}
-          <Link href={`/courses/${course.id}`} className="group/title">
+          <Link href={`/${course.id}`} className="group/title">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-3 
                          group-hover/title:text-blue-600 dark:group-hover/title:text-blue-400 
                          transition-colors duration-200 line-clamp-2 leading-tight">
@@ -172,7 +172,7 @@ export default function CourseCard({ course, isEnrolled, userId }: CourseCardPro
             {userId ? (
               isEnrolled ? (
                 <div className="space-y-3">
-                  <Link href={`/courses/${course.id}/learn`}>
+                  <Link href={`/${course.id}/learn`}>
                     <button className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 
                                      hover:from-emerald-600 hover:to-emerald-700 
                                      text-white font-bold py-3 px-4 rounded-lg 
@@ -208,7 +208,7 @@ export default function CourseCard({ course, isEnrolled, userId }: CourseCardPro
                   </div>
                 </div>
               ) : (
-                <Link href={`/courses/${course.id}`}>
+                <Link href={`/${course.id}`}>
                   <button className="w-full bg-gradient-to-r from-blue-500 to-blue-600 
                                    hover:from-blue-600 hover:to-blue-700 
                                    text-white font-bold py-3 px-4 rounded-lg 
@@ -223,7 +223,7 @@ export default function CourseCard({ course, isEnrolled, userId }: CourseCardPro
               )
             ) : (
               <div className="space-y-3">
-                <Link href={`/courses/${course.id}`}>
+                <Link href={`/${course.id}`}>
                   <button className="w-full bg-gradient-to-r from-gray-600 to-gray-700 
                                    hover:from-gray-700 hover:to-gray-800 
                                    text-white font-bold py-3 px-4 rounded-lg 

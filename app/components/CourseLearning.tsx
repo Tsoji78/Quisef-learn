@@ -99,7 +99,7 @@ export default function CourseLearning({ course, moduleId }: CourseLearningProps
             This course doesn't have any modules yet.
           </p>
           <Link
-            href={`/courses/${course.id}`}
+            href={`/courses/`}
             className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             <ArrowLeft size={16} className="mr-2" />

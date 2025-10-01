@@ -499,7 +499,7 @@ function CourseLearnPageContent() {
           const firstModule = modules[0];
           const firstLesson = firstModule?.lessons?.[0];
           if (firstModule && firstLesson) {
-            router.replace(`/courses/${courseId}/learn?module=${firstModule.id}&lesson=${firstLesson.id}`);
+            router.replace(`/${courseId}/learn?module=${firstModule.id}&lesson=${firstLesson.id}`);
             return;
           }
         }
@@ -543,7 +543,7 @@ function CourseLearnPageContent() {
       setSelectedModule(module);
       setSelectedLesson(lesson);
       if (router) {
-        router.push(`/courses/${courseId}/learn?module=${module.id}&lesson=${lesson.id}`);
+        router.push(`/${courseId}/learn?module=${module.id}&lesson=${lesson.id}`);
       }
     } catch (err) {
       console.error('Error selecting lesson:', err);
@@ -761,7 +761,7 @@ function CourseLearnPageContent() {
             You need to enroll in this course to access its content.
           </p>
           <Link
-            href={`/courses/${courseId}`}
+            href={`/${courseId}`}
             className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
           >
             View Course Details
@@ -784,7 +784,7 @@ function CourseLearnPageContent() {
             This course doesn't have any content yet. Please check back later.
           </p>
           <Link
-            href={`/courses/${courseId}`}
+            href={`/courses`}
             className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
           >
             Back to Course
@@ -804,7 +804,7 @@ function CourseLearnPageContent() {
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-4">
             <Link
-              href={`/courses/${courseId}`}
+              href={`/${courseId}`}
               className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 transition-colors text-sm"
             >
               <ArrowLeft size={16} className="mr-1" />

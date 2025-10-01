@@ -284,7 +284,7 @@ const CourseEnrollment = memo(({
 
           {/* Action Button */}
           {isEnrolled ? (
-            <Link href={`/courses/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
+            <Link href={`/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
               <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 sm:py-3 px-4 rounded-lg transition-colors mb-4">
                 Resume Course
               </button>
@@ -367,7 +367,7 @@ const CourseEnrollment = memo(({
                   >
                     Close
                   </button>
-                  <Link href={`/courses/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
+                  <Link href={`/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
                     <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
                       Start Learning
                     </button>
