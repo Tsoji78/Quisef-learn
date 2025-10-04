@@ -38,7 +38,11 @@ export default function CourseLearning({ course, moduleId }: CourseLearningProps
     );
   }
 
-  const modules = course.modules || [];
+  // Ensure every module.description is a string
+  const modules = (course.modules || []).map(m => ({
+    ...m,
+    description: m.description ?? '',
+  }));
   
   // Custom hooks
   const { 
