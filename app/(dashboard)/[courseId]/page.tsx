@@ -1,7 +1,7 @@
 // app/courses/[courseId]/enroll/page.tsx
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useCourseDetails } from '@/hooks/useCourseDetails';
 import { useEnrollment } from '@/hooks/useEnrollment';
@@ -9,51 +9,59 @@ import CourseEnrollment from '@/components/CourseEnrollment';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import DebugPanel from '@/components/DebugPanel';
-import { useState, useEffect, useRef, Suspense } from 'react';
+import { useState, useEffect, useRef, Component, ReactNode } from 'react';
 
-// Error Boundary Component
-function ErrorBoundary({ children }: { children: React.ReactNode }) {
-  const [hasError, setHasError] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  if (hasError) {
-    return (
-      <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
-        <div className="text-center p-8">
-          <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
-          <p className="text-gray-600 mb-4">
-            {error?.message || 'An error occurred while loading the course enrollment page.'}
-          </p>
-          <div className="flex gap-4 justify-center">
-            <button 
-              onClick={() => {
-                setHasError(false);
-                setError(null);
-                window.location.reload();
-              }}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            >
-              Try Again
-            </button>
-            <Link
-              href="/courses"
-              className="flex items-center text-blue-600 hover:text-blue-800 px-4 py-2 border border-blue-600 rounded hover:bg-blue-50"
-            >
-              <ArrowLeft size={18} className="mr-2" />
-              Back to Courses
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+// Proper Error Boundary Component
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
   }
 
-  try {
-    return <>{children}</>;
-  } catch (err) {
-    setHasError(true);
-    setError(err instanceof Error ? err : new Error('Unknown error'));
-    return null;
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex justify-center items-center">
+          <div className="text-center p-8 max-w-lg">
+            <h2 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              {this.state.error?.message || 'An error occurred while loading the course enrollment page.'}
+            </p>
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  window.location.reload();
+                }}
+                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+              >
+                Try Again
+              </button>
+              <Link
+                href="/courses"
+                className="flex items-center text-blue-600 hover:text-blue-800 px-4 py-2 border border-blue-600 rounded hover:bg-blue-50"
+              >
+                <ArrowLeft size={18} className="mr-2" />
+                Back to Courses
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
   }
 }
 
@@ -72,46 +80,73 @@ function LoadingSpinner({ message = 'Loading...' }: { message?: string }) {
 // Main Course Enrollment Component
 function CourseEnrollmentPageContent() {
   const params = useParams();
+  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const courseId = params?.courseId as string;
-  const { course, isEnrolled, loading, error, lastModuleId } = useCourseDetails(courseId, user?.uid || null);
-  const { handleEnrollment, enrolling, error: enrollmentError } = useEnrollment(courseId, user?.uid || null);
+  const [mounted, setMounted] = useState(false);
+  
+  // Ensure courseId is properly extracted
+  const courseId = params?.courseId as string | undefined;
+  
+  const { course, isEnrolled, loading, error, lastModuleId } = useCourseDetails(
+    courseId || '', 
+    user?.uid || null
+  );
+  const { handleEnrollment, enrolling, error: enrollmentError } = useEnrollment(
+    courseId || '', 
+    user?.uid || null
+  );
+  
   const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
   const renderCount = useRef(0);
 
+  // Handle client-side mounting
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   renderCount.current += 1;
-  console.log(`CourseEnrollmentPage render count: ${renderCount.current}`);
 
   useEffect(() => {
-    console.log('useEffect ran with dependencies:', {
-      courseId,
-      authLoading,
-      userUid: user?.uid,
-      loading,
-      error,
-      course: course?.id,
-    });
+    if (!mounted) return;
 
     const newDebugInfo = {
-      courseId,
+      courseId: courseId || 'No courseId',
       authLoading,
       user: user?.uid || 'No user',
       loading,
-      error,
+      error: error || 'No error',
       courseExists: !!course,
       courseTitle: course?.title || 'No title',
-      enrollmentError,
+      enrollmentError: enrollmentError || 'No enrollment error',
+      mounted,
+      renderCount: renderCount.current,
     };
 
     setDebugInfo((prev) => {
       if (JSON.stringify(prev) !== JSON.stringify(newDebugInfo)) {
-        console.log('Updating debugInfo:', newDebugInfo);
         return newDebugInfo;
       }
-      console.log('No debugInfo update needed');
       return prev;
     });
-  }, [courseId, authLoading, user?.uid, loading, error, course, enrollmentError]);
+  }, [courseId, authLoading, user?.uid, loading, error, course, enrollmentError, mounted]);
+
+  // Redirect if no courseId
+  useEffect(() => {
+    if (mounted && !courseId) {
+      console.error('No courseId provided, redirecting to courses');
+      router.push('/courses');
+    }
+  }, [mounted, courseId, router]);
+
+  // Don't render anything until mounted (prevents hydration issues)
+  if (!mounted) {
+    return <LoadingSpinner message="Initializing..." />;
+  }
+
+  // Check for courseId after mounting
+  if (!courseId) {
+    return <LoadingSpinner message="Redirecting..." />;
+  }
 
   if (loading || authLoading) {
     return (
@@ -121,9 +156,9 @@ function CourseEnrollmentPageContent() {
           <p className="text-gray-600 dark:text-gray-400">
             {authLoading ? 'Checking authentication...' : 'Loading course details...'}
           </p>
-          <div className="text-sm text-gray-500">Course ID: {courseId || 'Not found'}</div>
+          <div className="text-sm text-gray-500">Course ID: {courseId}</div>
         </div>
-        <DebugPanel debugInfo={debugInfo} />
+        {process.env.NODE_ENV === 'development' && <DebugPanel debugInfo={debugInfo} />}
       </div>
     );
   }
@@ -164,7 +199,7 @@ function CourseEnrollmentPageContent() {
             </button>
           </div>
         </div>
-        <DebugPanel debugInfo={debugInfo} />
+        {process.env.NODE_ENV === 'development' && <DebugPanel debugInfo={debugInfo} />}
       </div>
     );
   }
@@ -191,21 +226,20 @@ function CourseEnrollmentPageContent() {
             lastModuleId={lastModuleId}
             handleEnrollment={handleEnrollment}
             enrolling={enrolling}
+            error={enrollmentError}
           />
         </div>
       </div>
-      <DebugPanel debugInfo={debugInfo} />
+      {process.env.NODE_ENV === 'development' && <DebugPanel debugInfo={debugInfo} />}
     </div>
   );
 }
 
-// Main Export with Suspense and Error Boundary
+// Main Export with Error Boundary (no Suspense)
 export default function CourseEnrollmentPage() {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<LoadingSpinner message="Loading course enrollment..." />}>
-        <CourseEnrollmentPageContent />
-      </Suspense>
+      <CourseEnrollmentPageContent />
     </ErrorBoundary>
   );
 }
