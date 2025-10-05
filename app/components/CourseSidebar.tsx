@@ -31,7 +31,7 @@ export const CourseSidebar: React.FC<CourseSidebarProps> = ({
         {/* Course Header */}
         <div className="mb-6">
           <Link
-            href={`/courses/${course.id}`}
+            href={`/${course.id}`}
             className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors mb-4"
           >
             <ArrowLeft size={18} className="mr-2" />

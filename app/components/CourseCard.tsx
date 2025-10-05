@@ -36,6 +36,11 @@ export default function CourseCard({ course, isEnrolled, userId }: CourseCardPro
     return 'bg-blue-500';
   };
 
+  // Get lastModuleId from course.modules if available
+  const lastModuleId = course.modules && course.modules.length > 0
+    ? course.modules[course.modules.length - 1].id
+    : '';
+
   return (
     <div className="group h-full">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden 
@@ -172,7 +177,7 @@ export default function CourseCard({ course, isEnrolled, userId }: CourseCardPro
             {userId ? (
               isEnrolled ? (
                 <div className="space-y-3">
-                  <Link href={`/${course.id}/learn`}>
+                  <Link href={`/${course.id}/learn?module=${lastModuleId}`}>
                     <button className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 
                                      hover:from-emerald-600 hover:to-emerald-700 
                                      text-white font-bold py-3 px-4 rounded-lg 

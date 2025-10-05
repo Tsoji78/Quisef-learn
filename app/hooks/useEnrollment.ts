@@ -55,7 +55,7 @@ export function useEnrollment(courseId: string, userId: string | null) {
       toast.success('Enrolled successfully!');
       
       // Optional: Redirect to course page after successful enrollment
-      // router.push(`/dashboard/courses/${courseId}`);
+      // router.push(`/courses/${courseId}`);
       
       return true;
     } catch (err: any) {
