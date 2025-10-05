@@ -11,6 +11,8 @@ export function middleware(request: NextRequest) {
     '/',
     '/about',
     '/catalogue',
+    '/courseId',
+    '/learn',
     
     // Add other public routes if necessary
   ];
