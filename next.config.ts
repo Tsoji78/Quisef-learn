@@ -33,7 +33,7 @@ const nextConfig = {
   experimental: {
     // Enable app directory features
     serverActions: {
-      allowedOrigins: ['localhost:3000'],
+      allowedOrigins: ['localhost:3000','learn.quietshelter.org','quietshelter.org'],
     },
   },
   
