@@ -37,27 +37,8 @@ const nextConfig = {
     },
   },
   
-  // Rewrites for handling client-side routing
-  async rewrites() {
-    return {
-      beforeFiles: [],
-      afterFiles: [
-        {
-          source: '/:courseId/learn',
-          destination: '/:courseId/learn',
-        },
-        {
-          source: '/courses/',
-          destination: '/courses/',
-        },
-        {
-          source: '/:courseId',
-          destination: '/:courseId',
-        },
-      ],
-      fallback: [],
-    };
-  },
+  // REMOVED PROBLEMATIC REWRITES - App Router handles routing automatically
+  // The rewrites were interfering with /courses/[courseId]/* routes
   
   // Headers for better caching, security, and routing
   async headers() {
@@ -96,15 +77,15 @@ const nextConfig = {
     ];
   },
   
-  // Redirects for common routing patterns
+  // Redirects - Only add if you need to redirect OLD routes to NEW routes
   async redirects() {
     return [
-      // Add any specific redirects here if needed
-      // Example:
+      // If you had old routes that need redirecting, add them here
+      // For example, if you previously had /:courseId and want to redirect to /courses/:courseId:
       // {
-      //   source: '/old-route',
-      //   destination: '/new-route',
-      //   permanent: true,
+      //   source: '/:courseId((?!courses|api|_next|static).*)',
+      //   destination: '/courses/:courseId',
+      //   permanent: false,
       // },
     ];
   },
@@ -113,8 +94,10 @@ const nextConfig = {
   webpack: (config: any, { isServer }: { isServer: boolean }) => {
     // Fixes for client-side modules
     if (!isServer) {
+      // ensure resolve and fallback objects exist before merging
+      config.resolve = config.resolve || {};
       config.resolve.fallback = {
-        ...config.resolve.fallback,
+        ...(config.resolve.fallback || {}),
         fs: false,
         net: false,
         tls: false,
