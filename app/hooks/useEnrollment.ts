@@ -11,7 +11,7 @@ export function useEnrollment(courseId: string, userId: string | null) {
 
   const handleEnrollment = useCallback(async () => {
     if (!userId) {
-      router.push(`/auth/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`);
+      router.push(`/auth/login?redirect=${encodeURIComponent(`/${courseId}`)}`);
       return false;
     }
 
@@ -25,11 +25,14 @@ export function useEnrollment(courseId: string, userId: string | null) {
     setError(null);
 
     try {
+      console.log('🎓 Starting enrollment process for course:', courseId);
+
       // Check enrollment status first
       const enrollmentRef = doc(db, 'users', userId, 'enrollments', courseId);
       const enrollmentSnap = await getDoc(enrollmentRef);
 
       if (enrollmentSnap.exists()) {
+        console.log('⚠️ User already enrolled in this course');
         throw new Error('You are already enrolled in this course');
       }
 
@@ -40,6 +43,8 @@ export function useEnrollment(courseId: string, userId: string | null) {
         enrolledAt: serverTimestamp(),
         status: 'active',
       });
+
+      console.log('✅ Enrollment document created');
 
       // Initialize progress tracking
       const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
@@ -52,13 +57,36 @@ export function useEnrollment(courseId: string, userId: string | null) {
         progress: 0,
       });
 
+      console.log('✅ Progress tracking initialized');
+
       toast.success('Enrolled successfully!');
-      
-      // Optional: Redirect to course page after successful enrollment
-      // router.push(`/courses/${courseId}`);
-      
+
+      // Get course data to find first module
+      const courseRef = doc(db, 'courses', courseId);
+      const courseSnap = await getDoc(courseRef);
+
+      if (courseSnap.exists()) {
+        const courseData = courseSnap.data();
+        const firstModuleId = courseData.modules?.[0]?.id || courseData.firstModuleId;
+
+        if (firstModuleId) {
+          console.log('🚀 Redirecting to first module:', firstModuleId);
+          // Redirect to the first module of the course
+          router.push(`/${courseId}/learn/${firstModuleId}`);
+        } else {
+          console.warn('⚠️ No modules found, redirecting to courses list');
+          // No modules available, go back to courses
+          router.push('/courses');
+        }
+      } else {
+        console.error('❌ Course document not found');
+        // Course not found, redirect to courses list
+        router.push('/courses');
+      }
+
       return true;
     } catch (err: any) {
+      console.error('❌ Enrollment error:', err);
       const errorMessage = err.message || 'Failed to enroll';
       setError(errorMessage);
       toast.error(`Failed to enroll: ${errorMessage}`);

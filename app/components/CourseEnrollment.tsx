@@ -75,10 +75,24 @@ const CourseEnrollment = memo(({
     }
   };
 
+  // FIXED: Correct route navigation
   const handleStartLearning = () => {
-    // Fixed: Use correct route structure
-    const learnUrl = `/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`;
-    router.push(learnUrl);
+    console.log('🚀 Starting learning for course:', course.id);
+    console.log('📍 Last module ID:', lastModuleId);
+    console.log('📚 Available modules:', course.modules?.length || 0);
+
+    if (course.modules && course.modules.length > 0) {
+      // Use lastModuleId if available, otherwise use first module
+      const moduleId = lastModuleId || course.modules[0].id;
+      const learnUrl = `/${course.id}/learn/${moduleId}`;
+      
+      console.log('✅ Navigating to:', learnUrl);
+      router.push(learnUrl);
+    } else {
+      // No modules available, redirect to courses list
+      console.warn('⚠️ No modules found, redirecting to courses');
+      router.push('/courses');
+    }
   };
 
   return (
