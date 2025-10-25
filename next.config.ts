@@ -80,7 +80,7 @@ const nextConfig = {
       },
       // Add specific headers for dynamic routes
       {
-        source: '/courses/:courseId*',
+        source: '/:courseId*',
         headers: [
           {
             key: 'Cache-Control',
@@ -97,16 +97,16 @@ const nextConfig = {
       beforeFiles: [
         // Ensure course routes are properly handled
         {
-          source: '/courses/:courseId',
-          destination: '/courses/:courseId',
+          source: '/courseId',
+          destination: '/courseId',
         },
         {
-          source: '/courses/:courseId/enroll',
-          destination: '/courses/:courseId/enroll',
+          source: '/courseId/enroll',
+          destination: '/courseId/enroll',
         },
         {
-          source: '/courses/:courseId/learn',
-          destination: '/courses/:courseId/learn',
+          source: '/:courseId/learn',
+          destination: '/:courseId/learn',
         },
       ],
     };
