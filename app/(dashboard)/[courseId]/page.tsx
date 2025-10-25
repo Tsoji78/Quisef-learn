@@ -11,7 +11,9 @@ import { ArrowLeft } from 'lucide-react';
 import DebugPanel from '@/components/DebugPanel';
 import { useState, useEffect, useRef, Component, ReactNode } from 'react';
 
+// CRITICAL: Force dynamic rendering for client-side authentication
 export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
 
 // Proper Error Boundary Component
 class ErrorBoundary extends Component<
@@ -237,7 +239,7 @@ function CourseEnrollmentPageContent() {
   );
 }
 
-// Main Export with Error Boundary (no Suspense)
+// Main Export with Error Boundary
 export default function CourseEnrollmentPage() {
   return (
     <ErrorBoundary>

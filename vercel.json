@@ -1,8 +1,32 @@
 {
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": ["iad1"],
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "**/*"
+      "source": "/courseId",
+      "destination": "/courseId"
+    },
+    {
+      "source": "/courseId/enroll",
+      "destination": "/courseId/enroll"
+    },
+    {
+      "source": "/courseId/learn",
+      "destination": "/courseId/learn"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/courses/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
     }
   ]
 }

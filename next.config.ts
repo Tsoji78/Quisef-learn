@@ -10,8 +10,10 @@ const nextConfig = {
   },
   reactStrictMode: true,
   
-  // Output configuration for deployment
-  output: 'standalone',
+  // CRITICAL FIX: Remove 'standalone' for dynamic routes with client-side rendering
+  // Use 'standalone' only for fully server-rendered apps
+  // For Firebase + Client Components, omit this or use undefined
+  // output: 'standalone', // REMOVE THIS LINE
   
   // Trailing slash configuration
   trailingSlash: false,
@@ -28,14 +30,18 @@ const nextConfig = {
         protocol: 'https',
         hostname: '**.googleapis.com',
       },
+      {
+        protocol: 'https',
+        hostname: 'firebasestorage.googleapis.com',
+      },
     ],
   },
   
   // Experimental features for better route handling
   experimental: {
-    appDir: true,
+    // appDir: true, // This is now default in Next.js 13.4+, remove it
     serverActions: {
-      allowedOrigins: ['localhost:3000','learn.quietshelter.org','quietshelter.org'],
+      allowedOrigins: ['localhost:3000', 'learn.quietshelter.org', 'quietshelter.org', 'www.quietshelter.org'],
     },
   },
   
@@ -72,15 +78,48 @@ const nextConfig = {
           },
         ],
       },
+      // Add specific headers for dynamic routes
+      {
+        source: '/courses/:courseId*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-cache, no-store, must-revalidate',
+          },
+        ],
+      },
     ];
   },
   
+  // CRITICAL: Add rewrites for dynamic routes
+  async rewrites() {
+    return {
+      beforeFiles: [
+        // Ensure course routes are properly handled
+        {
+          source: '/courses/:courseId',
+          destination: '/courses/:courseId',
+        },
+        {
+          source: '/courses/:courseId/enroll',
+          destination: '/courses/:courseId/enroll',
+        },
+        {
+          source: '/courses/:courseId/learn',
+          destination: '/courses/:courseId/learn',
+        },
+      ],
+    };
+  },
+  
   async redirects() {
-    return [];
+    return [
+      // Add any necessary redirects here
+    ];
   },
   
   // Webpack configuration (only used when NOT using Turbopack)
-  webpack: (config: any, { isServer }: { isServer: boolean }) => {
+  webpack: (config : any,  { isServer }: { isServer: boolean }) => {
     if (!isServer) {
       config.resolve = config.resolve || {};
       config.resolve.fallback = {
@@ -88,6 +127,9 @@ const nextConfig = {
         fs: false,
         net: false,
         tls: false,
+        crypto: false,
+        stream: false,
+        buffer: false,
       };
     }
     
@@ -101,8 +143,11 @@ const nextConfig = {
       fs: false,
       net: false,
       tls: false,
+      crypto: false,
+      stream: false,
+      buffer: false,
       underscore: 'lodash',
-      mocha: 'mocha/browser-entry.js',
+      mocha: { browser: 'mocha/browser-entry.js' },
     },
     resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'],
   },
