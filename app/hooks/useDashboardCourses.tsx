@@ -40,15 +40,28 @@ export function useDashboardCourses(userId: string | null) {
             return {
               id: courseDoc.id,
               title: data.title || 'Untitled Course',
+              description: data.description || 'No description available',
               instructor: data.instructor || 'Unknown Instructor',
+              instructor_image: data.instructor_image || undefined,
+              instructor_bio: data.instructor_bio || undefined,
               level: ['Beginner', 'Intermediate', 'Advanced'].includes(data.level) ? data.level : 'Beginner',
               duration: data.duration || 'Unknown',
               progress: typeof data.progress === 'number' ? data.progress : 0,
               thumbnail: data.thumbnail || '/api/placeholder/400/250?text=No+Image',
               category: data.category || 'Uncategorized',
+              rating: typeof data.rating === 'number' ? data.rating : undefined,
+              totalStudents: typeof data.totalStudents === 'number' ? data.totalStudents : 0,
+              lastUpdated: data.lastUpdated || 'Recently',
+              price: typeof data.price === 'number' ? data.price : 0,
+              originalPrice: typeof data.originalPrice === 'number' ? data.originalPrice : undefined,
+              whatYouLearn: Array.isArray(data.whatYouLearn) ? data.whatYouLearn : [],
+              requirements: Array.isArray(data.requirements) ? data.requirements : [],
+              targetAudience: Array.isArray(data.targetAudience) ? data.targetAudience : [],
+              certificate: typeof data.certificate === 'boolean' ? data.certificate : false,
+              preview_video: data.preview_video || undefined,
               groupId,
               modules: Array.isArray(data.modules) ? data.modules : [],
-            };
+            } as Course;
           })
         );
 

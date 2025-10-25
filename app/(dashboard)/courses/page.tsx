@@ -4,7 +4,6 @@ import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useDashboardCourses } from '@/hooks/useDashboardCourses';
 import DashboardCourseList from '@/components/DashboardCourseList';
-import Link from 'next/link';
 
 export default function CoursesPage() {
   const { isDark } = useTheme();
@@ -63,14 +62,7 @@ export default function CoursesPage() {
               />
             </svg>
             <p className="text-sm">
-              <Link href="/auth/login" className="font-semibold hover:underline">
-                Sign in
-              </Link>{' '}
-              to enroll in courses and track your progress, or{' '}
-              <Link href="/auth/register" className="font-semibold hover:underline">
-                create an account
-              </Link>{' '}
-              to get started.
+              Sign in to enroll in courses and track your progress. Authentication is handled automatically.
             </p>
           </div>
         </div>
