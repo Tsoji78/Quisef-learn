@@ -33,6 +33,7 @@ const nextConfig = {
   
   // Experimental features for better route handling
   experimental: {
+    appDir: true,
     serverActions: {
       allowedOrigins: ['localhost:3000','learn.quietshelter.org','quietshelter.org'],
     },

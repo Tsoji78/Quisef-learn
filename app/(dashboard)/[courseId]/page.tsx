@@ -11,6 +11,8 @@ import { ArrowLeft } from 'lucide-react';
 import DebugPanel from '@/components/DebugPanel';
 import { useState, useEffect, useRef, Component, ReactNode } from 'react';
 
+export const dynamic = 'force-dynamic';
+
 // Proper Error Boundary Component
 class ErrorBoundary extends Component<
   { children: ReactNode },
