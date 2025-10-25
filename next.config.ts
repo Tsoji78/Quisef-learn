@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -9,7 +11,7 @@ const nextConfig = {
   reactStrictMode: true,
   
   // Output configuration for deployment
-  output: 'standalone', // Optimized for deployment platforms
+  output: 'standalone',
   
   // Trailing slash configuration
   trailingSlash: false,
@@ -31,14 +33,10 @@ const nextConfig = {
   
   // Experimental features for better route handling
   experimental: {
-    // Enable app directory features
     serverActions: {
       allowedOrigins: ['localhost:3000','learn.quietshelter.org','quietshelter.org'],
     },
   },
-  
-  // REMOVED PROBLEMATIC REWRITES - App Router handles routing automatically
-  // The rewrites were interfering with /courses/[courseId]/* routes
   
   // Headers for better caching, security, and routing
   async headers() {
@@ -65,7 +63,6 @@ const nextConfig = {
         ],
       },
       {
-        // Cache static assets
         source: '/static/:path*',
         headers: [
           {
@@ -77,24 +74,13 @@ const nextConfig = {
     ];
   },
   
-  // Redirects - Only add if you need to redirect OLD routes to NEW routes
   async redirects() {
-    return [
-      // If you had old routes that need redirecting, add them here
-      // For example, if you previously had /:courseId and want to redirect to /courses/:courseId:
-      // {
-      //   source: '/:courseId((?!courses|api|_next|static).*)',
-      //   destination: '/courses/:courseId',
-      //   permanent: false,
-      // },
-    ];
+    return [];
   },
   
-  // Webpack configuration for better client-side bundle
+  // Webpack configuration (only used when NOT using Turbopack)
   webpack: (config: any, { isServer }: { isServer: boolean }) => {
-    // Fixes for client-side modules
     if (!isServer) {
-      // ensure resolve and fallback objects exist before merging
       config.resolve = config.resolve || {};
       config.resolve.fallback = {
         ...(config.resolve.fallback || {}),
@@ -105,6 +91,19 @@ const nextConfig = {
     }
     
     return config;
+  },
+
+  // Turbopack configuration (used when running with --turbopack)
+  turbo: {
+    resolveAlias: {
+      // Equivalent to webpack fallback for client-side
+      fs: false,
+      net: false,
+      tls: false,
+      underscore: 'lodash',
+      mocha: 'mocha/browser-entry.js',
+    },
+    resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json'],
   },
   
   // Page extensions

@@ -1,7 +1,8 @@
-import { memo, useState } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import { Course } from '@/types';
 import { useTheme } from '@/context/ThemeContext';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Clock, Users, Star, CheckCircle, PlayCircle, BookOpen, Award, Shield, Calendar, Globe, Download } from 'lucide-react';
 import parse from 'html-react-parser';
 
@@ -23,11 +24,16 @@ const CourseEnrollment = memo(({
   error 
 }: CourseEnrollmentProps) => {
   const { isDark } = useTheme();
+  const router = useRouter();
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
   const [enrollmentSuccess, setEnrollmentSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'curriculum' | 'instructor' | 'reviews'>('overview');
+  const [localIsEnrolled, setLocalIsEnrolled] = useState(isEnrolled);
 
-  console.log('CourseEnrollment rendered');
+  // Update local state when prop changes
+  React.useEffect(() => {
+    setLocalIsEnrolled(isEnrolled);
+  }, [isEnrolled]);
 
   // Helper function to get safe image URL
   const getSafeImageUrl = (url: string | undefined, fallbackText: string, size: string = '400/250') => {
@@ -65,7 +71,14 @@ const CourseEnrollment = memo(({
     const success = await handleEnrollment();
     if (success) {
       setEnrollmentSuccess(true);
+      setLocalIsEnrolled(true);
     }
+  };
+
+  const handleStartLearning = () => {
+    // Fixed: Use correct route structure
+    const learnUrl = `/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`;
+    router.push(learnUrl);
   };
 
   return (
@@ -88,7 +101,7 @@ const CourseEnrollment = memo(({
                 </button>
               </div>
             )}
-            {isEnrolled && (
+            {localIsEnrolled && (
               <div className="absolute top-4 left-4 bg-green-600 text-white px-3 py-1 rounded-full text-sm font-semibold">
                 Enrolled
               </div>
@@ -283,12 +296,13 @@ const CourseEnrollment = memo(({
           </div>
 
           {/* Action Button */}
-          {isEnrolled ? (
-            <Link href={`/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
-              <button className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 sm:py-3 px-4 rounded-lg transition-colors mb-4">
-                Resume Course
-              </button>
-            </Link>
+          {localIsEnrolled ? (
+            <button 
+              onClick={handleStartLearning}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 sm:py-3 px-4 rounded-lg transition-colors mb-4"
+            >
+              {lastModuleId ? 'Resume Course' : 'Start Course'}
+            </button>
           ) : (
             <button
               onClick={() => setShowEnrollmentModal(true)}
@@ -367,11 +381,12 @@ const CourseEnrollment = memo(({
                   >
                     Close
                   </button>
-                  <Link href={`/${course.id}/learn${lastModuleId ? `?module=${lastModuleId}` : ''}`}>
-                    <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors">
-                      Start Learning
-                    </button>
-                  </Link>
+                  <button 
+                    onClick={handleStartLearning}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors"
+                  >
+                    Start Learning
+                  </button>
                 </div>
               </>
             ) : (
@@ -379,7 +394,7 @@ const CourseEnrollment = memo(({
                 <h3 className="text-lg sm:text-xl font-semibold mb-4 text-gray-800 dark:text-white">Confirm Enrollment</h3>
                 <p className="text-gray-600 dark:text-gray-300 mb-6">
                   You are about to enroll in <strong>{course.title}</strong>.
-                  {(course.price ?? 0) > 0 && ` This will charge ${course.price ?? 0} to your account.`}
+                  {(course.price ?? 0) > 0 && ` This will charge $${course.price ?? 0} to your account.`}
                 </p>
                 {error && (
                   <div className="bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 px-4 py-3 rounded mb-4">
