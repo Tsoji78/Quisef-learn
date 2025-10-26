@@ -84,10 +84,10 @@ const CourseEnrollment = memo(({
     if (course.modules && course.modules.length > 0) {
       // Use lastModuleId if available, otherwise use first module
       const moduleId = lastModuleId || course.modules[0].id;
-      const learnUrl = `/${course.id}/learn/${moduleId}`;
+      const learnUrl = `/${course.id}/learn?module=${moduleId}`;
       
       console.log('✅ Navigating to:', learnUrl);
-      router.push('/${course.id}/learn/${moduleId}');
+      router.push(learnUrl);
     } else {
       // No modules available, redirect to courses list
       console.warn('⚠️ No modules found, redirecting to courses');
