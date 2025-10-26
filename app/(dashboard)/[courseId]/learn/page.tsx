@@ -11,7 +11,9 @@ import { useCertificate } from '@/hooks/useCertificate';
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { generateCertificate } from '@/lib/certificateUtils';
-import { toast } from 'react-hot-toast'
+import { toast } from 'react-hot-toast';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -633,28 +635,51 @@ function CourseLearnPageContent() {
           type: (['video', 'text', 'quiz'].includes(lesson.type) ? lesson.type : 'text'),
         })),
       };
+      
       await markModuleComplete(moduleWithType);
       
       const totalModules = modules?.length || 0;
       const completedCount = completedModules.length + 1;
       
-      // Check if all modules are completed
-      if (completedCount === totalModules && currentProgress >= 95) {
-        // Generate certificate in Firestore
+      // Check if all modules are completed (100% progress)
+      if (completedCount === totalModules) {
+        console.log('All modules completed! Generating certificate...');
+        
+        // Mark course as completed first
+        if (user && courseId) {
+          try {
+            const progressRef = doc(db, 'users', user.uid, 'courseProgress', courseId);
+            await updateDoc(progressRef, {
+              completed: true,
+              completedAt: serverTimestamp(),
+              progress: 100,
+            });
+            console.log('Course progress marked as completed');
+          } catch (progressError) {
+            console.error('Error updating course progress:', progressError);
+          }
+        }
+        
+        // Generate certificate
         if (user && course && courseId) {
           const certificateId = await generateCertificate({
             userId: user.uid,
             courseId: courseId,
             courseName: course.title || 'Untitled Course',
             studentName: user.displayName || user.email?.split('@')[0] || 'Student',
+            completionDate: new Date(),
           });
 
           if (certificateId) {
+            console.log('Certificate generated successfully:', certificateId);
             toast.success('🎉 Congratulations! Your certificate has been generated!');
+            toast.success('📜 Check your Certificates page to download it!', { duration: 5000 });
+            
             setCertificateGenerated(true);
             setTimeout(() => setShowCertificateModal(true), 2000);
           } else {
-            toast.error('Failed to generate certificate. Please contact support.');
+            console.error('Certificate generation returned null');
+            toast.error('Failed to generate certificate. Please try again or contact support.');
           }
         }
       }

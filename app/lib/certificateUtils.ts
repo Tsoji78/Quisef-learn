@@ -1,5 +1,5 @@
 // lib/certificateUtils.ts
-import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 interface GenerateCertificateParams {
@@ -7,7 +7,7 @@ interface GenerateCertificateParams {
   courseId: string;
   courseName: string;
   studentName: string;
-  completionDate?: Date;
+  completionDate?: Date | Timestamp;
 }
 
 /**
@@ -19,8 +19,11 @@ export async function generateCertificate(params: GenerateCertificateParams): Pr
   const { userId, courseId, courseName, studentName, completionDate } = params;
 
   try {
+    // Use consistent ID pattern
+    const certificateId = `${userId}_${courseId}`;
+    const certificateRef = doc(db, 'certificates', certificateId);
+    
     // Check if certificate already exists
-    const certificateRef = doc(db, 'certificates', `${userId}_${courseId}`);
     const existingCert = await getDoc(certificateRef);
 
     if (existingCert.exists()) {
@@ -28,28 +31,42 @@ export async function generateCertificate(params: GenerateCertificateParams): Pr
       return existingCert.id;
     }
 
-    // Create new certificate
+    // Create new certificate with proper timestamps
     const certificateData = {
       userId,
       courseId,
       courseName,
       studentName,
-      completionDate: completionDate || new Date(),
+      completionDate: completionDate || serverTimestamp(),
       issuedDate: serverTimestamp(),
       certificateGenerated: true,
+      createdAt: serverTimestamp(),
     };
 
     await setDoc(certificateRef, certificateData);
+    console.log('Certificate created successfully:', certificateId);
 
     // Update course progress to mark certificate as generated
-    const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
-    await updateDoc(progressRef, {
-      certificateGenerated: true,
-      certificateId: certificateRef.id,
-    });
+    try {
+      const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
+      const progressDoc = await getDoc(progressRef);
+      
+      if (progressDoc.exists()) {
+        await updateDoc(progressRef, {
+          certificateGenerated: true,
+          certificateId: certificateId,
+          certificateGeneratedAt: serverTimestamp(),
+        });
+        console.log('Course progress updated with certificate info');
+      } else {
+        console.warn('Course progress document not found for:', courseId);
+      }
+    } catch (progressError) {
+      console.error('Error updating progress, but certificate was created:', progressError);
+      // Don't fail the whole operation if progress update fails
+    }
 
-    console.log('Certificate generated successfully:', certificateRef.id);
-    return certificateRef.id;
+    return certificateId;
   } catch (error) {
     console.error('Error generating certificate:', error);
     return null;
@@ -79,15 +96,41 @@ export async function getCertificate(userId: string, courseId: string) {
     const certSnap = await getDoc(certificateRef);
     
     if (certSnap.exists()) {
+      const data = certSnap.data();
       return {
         id: certSnap.id,
-        ...certSnap.data(),
+        ...data,
+        completionDate: data.completionDate?.toDate?.() || new Date(),
+        issuedDate: data.issuedDate?.toDate?.() || new Date(),
       };
     }
     
     return null;
   } catch (error) {
     console.error('Error getting certificate:', error);
+    return null;
+  }
+}
+
+/**
+ * Force refresh/regenerate certificate
+ */
+export async function regenerateCertificate(params: GenerateCertificateParams): Promise<string | null> {
+  const { userId, courseId } = params;
+  
+  try {
+    // Delete existing certificate if any
+    const certificateRef = doc(db, 'certificates', `${userId}_${courseId}`);
+    const existingCert = await getDoc(certificateRef);
+    
+    if (existingCert.exists()) {
+      console.log('Deleting existing certificate to regenerate');
+    }
+    
+    // Generate new certificate
+    return await generateCertificate(params);
+  } catch (error) {
+    console.error('Error regenerating certificate:', error);
     return null;
   }
 }

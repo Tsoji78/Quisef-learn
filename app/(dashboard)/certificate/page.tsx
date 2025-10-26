@@ -193,13 +193,18 @@ export default function CertificatesPage() {
     setError(null);
 
     try {
+      console.log('Loading certificates for user:', userId);
+      
       // Fetch existing certificates
       const certificatesRef = collection(db, 'certificates');
       const certQuery = query(certificatesRef, where('userId', '==', userId));
       const querySnapshot = await getDocs(certQuery);
       
+      console.log(`Found ${querySnapshot.docs.length} existing certificates`);
+      
       const userCertificates: Certificate[] = querySnapshot.docs.map((doc) => {
         const data = doc.data();
+        console.log('Certificate data:', doc.id, data);
         return {
           id: doc.id,
           userId: data.userId || userId,
@@ -217,27 +222,40 @@ export default function CertificatesPage() {
       const progressQuery = query(progressRef, where('completed', '==', true));
       const progressSnapshot = await getDocs(progressQuery);
 
+      console.log(`Found ${progressSnapshot.docs.length} completed courses`);
+
       // Generate missing certificates
       const missingCertificates: string[] = [];
       
       for (const progressDoc of progressSnapshot.docs) {
         const progressData = progressDoc.data();
-        const existingCert = userCertificates.find((cert) => cert.courseId === progressData.courseId);
+        const courseId = progressData.courseId || progressDoc.id;
+        const existingCert = userCertificates.find((cert) => cert.courseId === courseId);
+
+        console.log(`Checking course ${courseId}: Certificate exists: ${!!existingCert}, Already generated: ${progressData.certificateGenerated}`);
 
         // Only generate if certificate doesn't exist and wasn't already generated
         if (!existingCert && !progressData.certificateGenerated) {
-          missingCertificates.push(progressData.courseId);
+          missingCertificates.push(courseId);
         }
       }
 
       // Generate certificates for missing courses
       if (missingCertificates.length > 0) {
-        console.log(`Generating ${missingCertificates.length} missing certificates...`);
+        console.log(`Generating ${missingCertificates.length} missing certificates:`, missingCertificates);
+        toast(`Generating ${missingCertificates.length} missing certificate(s)...`);
         
         for (const courseId of missingCertificates) {
           try {
-            const progressDoc = progressSnapshot.docs.find(doc => doc.data().courseId === courseId);
-            if (!progressDoc) continue;
+            const progressDoc = progressSnapshot.docs.find(doc => {
+              const data = doc.data();
+              return (data.courseId || doc.id) === courseId;
+            });
+            
+            if (!progressDoc) {
+              console.warn(`Progress doc not found for course ${courseId}`);
+              continue;
+            }
 
             const progressData = progressDoc.data();
             
@@ -246,11 +264,12 @@ export default function CertificatesPage() {
             const courseSnap = await getDoc(courseRef);
 
             if (!courseSnap.exists()) {
-              console.warn(`Course ${courseId} not found`);
+              console.warn(`Course ${courseId} not found in courses collection`);
               continue;
             }
 
             const courseData = courseSnap.data();
+            console.log(`Generating certificate for course: ${courseData.title}`);
             
             // Create certificate with consistent ID pattern
             const certificateRef = doc(db, 'certificates', `${userId}_${courseId}`);
@@ -259,12 +278,13 @@ export default function CertificatesPage() {
               courseId,
               courseName: courseData.title || 'Untitled Course',
               studentName: user?.displayName || user?.email?.split('@')[0] || 'Student',
-              completionDate: progressData.completionDate || new Date(),
+              completionDate: progressData.completionDate || progressData.completedAt || new Date(),
               issuedDate: new Date(),
               certificateGenerated: true,
             };
 
             await setDoc(certificateRef, certificateData);
+            console.log('Certificate created:', certificateRef.id);
             
             // Update progress
             await updateDoc(progressDoc.ref, {
@@ -284,17 +304,24 @@ export default function CertificatesPage() {
                 : new Date(),
             });
 
-            toast.success(`Certificate generated for ${courseData.title}`);
+            toast.success(`✅ Certificate generated for ${courseData.title}`);
           } catch (certError) {
             console.error(`Error generating certificate for course ${courseId}:`, certError);
+            toast.error(`Failed to generate certificate for course ${courseId}`);
           }
         }
+      } else {
+        console.log('No missing certificates to generate');
       }
 
       // Sort certificates (newest first)
-      setCertificates(
-        userCertificates.sort((a, b) => b.issuedDate.getTime() - a.issuedDate.getTime())
-      );
+      const sortedCertificates = userCertificates.sort((a, b) => b.issuedDate.getTime() - a.issuedDate.getTime());
+      console.log(`Total certificates loaded: ${sortedCertificates.length}`);
+      setCertificates(sortedCertificates);
+      
+      if (sortedCertificates.length > 0) {
+        toast.success(`✅ ${sortedCertificates.length} certificate(s) loaded successfully`);
+      }
     } catch (err: any) {
       console.error('Error loading certificates:', err);
       setError(getFriendlyErrorMessage(err));
