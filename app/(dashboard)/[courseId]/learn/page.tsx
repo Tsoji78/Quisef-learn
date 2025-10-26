@@ -10,6 +10,8 @@ import { useModuleNavigation } from '@/hooks/useModuleNavigation';
 import { useCertificate } from '@/hooks/useCertificate';
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { generateCertificate } from '@/lib/certificateUtils';
+import { toast } from 'react-hot-toast'
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -636,9 +638,25 @@ function CourseLearnPageContent() {
       const totalModules = modules?.length || 0;
       const completedCount = completedModules.length + 1;
       
+      // Check if all modules are completed
       if (completedCount === totalModules && currentProgress >= 95) {
-        setCertificateGenerated(true);
-        setTimeout(() => setShowCertificateModal(true), 2000);
+        // Generate certificate in Firestore
+        if (user && course && courseId) {
+          const certificateId = await generateCertificate({
+            userId: user.uid,
+            courseId: courseId,
+            courseName: course.title || 'Untitled Course',
+            studentName: user.displayName || user.email?.split('@')[0] || 'Student',
+          });
+
+          if (certificateId) {
+            toast.success('🎉 Congratulations! Your certificate has been generated!');
+            setCertificateGenerated(true);
+            setTimeout(() => setShowCertificateModal(true), 2000);
+          } else {
+            toast.error('Failed to generate certificate. Please contact support.');
+          }
+        }
       }
       
       if (nextModule && navigateToModule) {
@@ -648,6 +666,7 @@ function CourseLearnPageContent() {
       }
     } catch (err) {
       console.error('Error completing module:', err);
+      toast.error('An error occurred while completing the module.');
     }
   };
 

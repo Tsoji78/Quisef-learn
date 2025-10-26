@@ -2,14 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, getDocs, doc, getDoc, addDoc, updateDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Award, Download, Calendar, BookOpen, Star, User as LucideUser, ArrowLeft, Search, Filter } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
-import { User } from 'firebase/auth';
 
 interface Certificate {
   id: string;
@@ -188,7 +187,7 @@ export default function CertificatesPage() {
     [isDark]
   );
 
-  // Load user certificates with transaction support
+  // Load user certificates with automatic generation of missing ones
   const loadUserCertificates = useCallback(async (userId: string) => {
     setLoading(true);
     setError(null);
@@ -198,6 +197,7 @@ export default function CertificatesPage() {
       const certificatesRef = collection(db, 'certificates');
       const certQuery = query(certificatesRef, where('userId', '==', userId));
       const querySnapshot = await getDocs(certQuery);
+      
       const userCertificates: Certificate[] = querySnapshot.docs.map((doc) => {
         const data = doc.data();
         return {
@@ -212,56 +212,89 @@ export default function CertificatesPage() {
         };
       });
 
-      // Fetch completed courses and generate missing certificates
+      // Fetch completed courses without certificates
       const progressRef = collection(db, 'users', userId, 'courseProgress');
       const progressQuery = query(progressRef, where('completed', '==', true));
       const progressSnapshot = await getDocs(progressQuery);
 
+      // Generate missing certificates
+      const missingCertificates: string[] = [];
+      
       for (const progressDoc of progressSnapshot.docs) {
         const progressData = progressDoc.data();
         const existingCert = userCertificates.find((cert) => cert.courseId === progressData.courseId);
 
+        // Only generate if certificate doesn't exist and wasn't already generated
         if (!existingCert && !progressData.certificateGenerated) {
-          await runTransaction(db, async (transaction) => {
-            // Read course data
-            const courseRef = doc(db, 'courses', progressData.courseId);
-            const courseSnap = await transaction.get(courseRef);
+          missingCertificates.push(progressData.courseId);
+        }
+      }
+
+      // Generate certificates for missing courses
+      if (missingCertificates.length > 0) {
+        console.log(`Generating ${missingCertificates.length} missing certificates...`);
+        
+        for (const courseId of missingCertificates) {
+          try {
+            const progressDoc = progressSnapshot.docs.find(doc => doc.data().courseId === courseId);
+            if (!progressDoc) continue;
+
+            const progressData = progressDoc.data();
+            
+            // Fetch course data
+            const courseRef = doc(db, 'courses', courseId);
+            const courseSnap = await getDoc(courseRef);
 
             if (!courseSnap.exists()) {
-              console.warn(`Course ${progressData.courseId} not found for certificate generation`);
-              return;
+              console.warn(`Course ${courseId} not found`);
+              continue;
             }
 
             const courseData = courseSnap.data();
-            const certificateData: Certificate = {
-              id: '',
+            
+            // Create certificate with consistent ID pattern
+            const certificateRef = doc(db, 'certificates', `${userId}_${courseId}`);
+            const certificateData = {
               userId,
-              courseId: progressData.courseId,
+              courseId,
               courseName: courseData.title || 'Untitled Course',
               studentName: user?.displayName || user?.email?.split('@')[0] || 'Student',
-              completionDate: progressData.completionDate?.toDate() || new Date(),
+              completionDate: progressData.completionDate || new Date(),
               issuedDate: new Date(),
+              certificateGenerated: true,
             };
 
-            // Write new certificate
-            const certificateRef = doc(collection(db, 'certificates'));
-            transaction.set(certificateRef, certificateData);
-
-            // Update progress with certificate details
-            transaction.update(progressDoc.ref, {
+            await setDoc(certificateRef, certificateData);
+            
+            // Update progress
+            await updateDoc(progressDoc.ref, {
               certificateGenerated: true,
               certificateId: certificateRef.id,
             });
 
             // Add to local state
-            userCertificates.push({ ...certificateData, id: certificateRef.id });
+            userCertificates.push({
+              ...certificateData,
+              id: certificateRef.id,
+              completionDate: certificateData.completionDate instanceof Date 
+                ? certificateData.completionDate 
+                : certificateData.completionDate?.toDate?.() || new Date(),
+              issuedDate: certificateData.issuedDate instanceof Date 
+                ? certificateData.issuedDate 
+                : new Date(),
+            });
+
             toast.success(`Certificate generated for ${courseData.title}`);
-          });
+          } catch (certError) {
+            console.error(`Error generating certificate for course ${courseId}:`, certError);
+          }
         }
       }
 
-      // Sort certificates (default: newest first)
-      setCertificates(userCertificates.sort((a, b) => b.issuedDate.getTime() - a.issuedDate.getTime()));
+      // Sort certificates (newest first)
+      setCertificates(
+        userCertificates.sort((a, b) => b.issuedDate.getTime() - a.issuedDate.getTime())
+      );
     } catch (err: any) {
       console.error('Error loading certificates:', err);
       setError(getFriendlyErrorMessage(err));
@@ -446,10 +479,9 @@ export default function CertificatesPage() {
                   ? `No certificates match "${searchTerm}". Try a different search term.`
                   : certificates.length === 0
                     ? 'Complete your first course to earn a certificate and showcase your achievements!'
-                    : 'Certificates are missing for some completed courses. Contact support or try refreshing.'
-                }
+                    : 'No certificates match your current filters.'}
               </p>
-              {!searchTerm && (
+              {!searchTerm && certificates.length === 0 && (
                 <Link href="/courses">
                   <button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105">
                     Browse Courses
@@ -640,6 +672,12 @@ export default function CertificatesPage() {
                 Browse All Courses
               </button>
             </Link>
+            <button
+              onClick={() => loadUserCertificates(user?.uid || '')}
+              className="bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-xl transition-all duration-300 border-2 border-white/20"
+            >
+              Refresh Certificates
+            </button>
           </div>
         </div>
       </div>
