@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Course } from '@/types';
 
@@ -76,33 +76,31 @@ export function useCourseDetails(courseId: string, userId: string | null) {
     fetchCourse();
   }, [courseId]);
 
-  useEffect(() => {
-    if (!userId || !courseId) return;
+  // In useCourseDetails.ts - replace the enrollment check with:
+useEffect(() => {
+  if (!userId || !courseId) return;
 
-    const checkEnrollmentStatus = async () => {
-      try {
-        const enrollmentRef = doc(db, 'users', userId, 'enrollments', courseId);
-        const enrollmentSnap = await getDoc(enrollmentRef);
-        const enrolled = enrollmentSnap.exists();
-        setIsEnrolled(enrolled);
+  const enrollmentRef = doc(db, 'users', userId, 'enrollments', courseId);
+  
+  const unsubscribe = onSnapshot(enrollmentRef, (snap) => {
+    const enrolled = snap.exists();
+    setIsEnrolled(enrolled);
 
-        if (enrolled) {
-          const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
-          const progressSnap = await getDoc(progressRef);
-          if (progressSnap.exists()) {
-            const progressData = progressSnap.data();
-            const readModules = progressData.readModules || {};
-            const lastModule = Object.keys(readModules).sort().pop();
-            setLastModuleId(lastModule || null);
-          }
+    if (enrolled) {
+      const progressRef = doc(db, 'users', userId, 'courseProgress', courseId);
+      getDoc(progressRef).then(progressSnap => {
+        if (progressSnap.exists()) {
+          const progressData = progressSnap.data();
+          const readModules = progressData.readModules || {};
+          const lastModule = Object.keys(readModules).sort().pop();
+          setLastModuleId(lastModule || null);
         }
-      } catch (err) {
-        console.error('Error checking enrollment:', err);
-      }
-    };
+      });
+    }
+  });
 
-    checkEnrollmentStatus();
-  }, [userId, courseId]);
+  return () => unsubscribe();
+}, [userId, courseId]);
 
   // Memoize the return value to prevent unnecessary object recreation
   return useMemo(
