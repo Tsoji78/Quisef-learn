@@ -81,7 +81,7 @@ export function useEnrollment(courseId: string, userId: string | null) {
         try {
           console.log('🔗 Connecting user to course group:', groupId);
           
-          const groupRef = doc(db, 'courseGroups', groupId);
+          const groupRef = doc(db, 'groups', groupId);
           const groupSnap = await getDoc(groupRef);
 
           if (groupSnap.exists()) {
@@ -92,7 +92,6 @@ export function useEnrollment(courseId: string, userId: string | null) {
               email: userData?.email || '',
               role: 'Student' as const,
               profileImage: userData?.photoURL || userData?.profileImage || '',
-              joinedAt: new Date(),
             };
 
             // Add user to group members array
