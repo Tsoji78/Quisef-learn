@@ -488,7 +488,7 @@ function CourseLearnPageContent() {
           const firstModule = modules[0];
           const firstLesson = firstModule?.lessons?.[0];
           if (firstModule && firstLesson) {
-            router.replace(`/learn/${courseId}?module=${firstModule.id}&lesson=${firstLesson.id}`);
+            router.replace(`/${courseId}/learn?module=${firstModule.id}&lesson=${firstLesson.id}`);
             return;
           }
         }
@@ -530,7 +530,7 @@ function CourseLearnPageContent() {
       setSelectedModule(module);
       setSelectedLesson(lesson);
       if (router) {
-        router.push(`/learn/${courseId}?module=${module.id}&lesson=${lesson.id}`);
+        router.push(`/${courseId}/learn?module=${module.id}&lesson=${lesson.id}`);
       }
     } catch (err) {
       console.error('Error selecting lesson:', err);

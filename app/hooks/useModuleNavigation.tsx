@@ -90,13 +90,13 @@ export const useModuleNavigation = ({
       }
       
       // Navigate to new URL
-      const newUrl = `/courses/${courseId}/learn?${params.toString()}`;
+      const newUrl = `/${courseId}/learn?${params.toString()}`;
       router.push(newUrl);
       
     } catch (error) {
       console.error('Error navigating to module:', error);
       // Fallback navigation without search params preservation
-      router.push(`/courses/${courseId}/learn?module=${module.id}`);
+      router.push(`/${courseId}/learn?module=${module.id}`);
     }
   }, [courseId, router]);
 

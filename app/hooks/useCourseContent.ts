@@ -502,7 +502,7 @@ export const useModuleNavigation = ({
     try {
       const params = new URLSearchParams(window.location.search);
       params.set('module', module.id);
-      const newUrl = `/courses/${courseId}/learn?${params.toString()}`;
+      const newUrl = `/${courseId}/learn?${params.toString()}`;
       window.history.pushState({}, '', newUrl);
     } catch (error) {
       console.error('Error navigating to module:', error);

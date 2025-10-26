@@ -77,15 +77,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             </ul>
           </nav>
           <div className="p-4 border-t border-gray-700">
-            <button
-              onClick={handleLogout}
-              className={`w-full p-2 rounded hover:bg-gray-700 transition-colors flex items-center ${
-                isCollapsed ? 'justify-center' : ''
-              }`}
-            >
-              <span className="text-xl">🚪</span>
-              {!isCollapsed && <span className="ml-3">Logout</span>}
-            </button>
+           
           </div>
         </div>
       </div>
