@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
@@ -36,12 +36,29 @@ export function useEnrollment(courseId: string, userId: string | null) {
         throw new Error('You are already enrolled in this course');
       }
 
+      // Get user details for group membership
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
+
+      // Get course details to find associated group
+      const courseRef = doc(db, 'courses', courseId);
+      const courseSnap = await getDoc(courseRef);
+      
+      if (!courseSnap.exists()) {
+        throw new Error('Course not found');
+      }
+
+      const courseData = courseSnap.data();
+      const groupId = courseData.groupId;
+
       // Create enrollment document
       await setDoc(enrollmentRef, {
         courseId,
         userId,
         enrolledAt: serverTimestamp(),
         status: 'active',
+        groupId: groupId || null,
       });
 
       console.log('✅ Enrollment document created');
@@ -59,10 +76,47 @@ export function useEnrollment(courseId: string, userId: string | null) {
 
       console.log('✅ Progress tracking initialized');
 
-      toast.success('Enrolled successfully!');
+      // Auto-connect to course group if groupId exists
+      if (groupId) {
+        try {
+          console.log('🔗 Connecting user to course group:', groupId);
+          
+          const groupRef = doc(db, 'courseGroups', groupId);
+          const groupSnap = await getDoc(groupRef);
 
-      // ✅ FIXED: Return true and let the component handle navigation
-      // This allows the success modal to show properly
+          if (groupSnap.exists()) {
+            // Prepare member data
+            const newMember = {
+              id: userId,
+              name: userData?.displayName || userData?.name || 'Unknown User',
+              email: userData?.email || '',
+              role: 'Student' as const,
+              profileImage: userData?.photoURL || userData?.profileImage || '',
+              joinedAt: new Date(),
+            };
+
+            // Add user to group members array
+            await updateDoc(groupRef, {
+              members: arrayUnion(newMember),
+              updatedAt: serverTimestamp(),
+            });
+
+            console.log('✅ User successfully added to course group');
+            toast.success('Enrolled successfully and connected to course group!');
+          } else {
+            console.warn('⚠️ Course group not found:', groupId);
+            toast.success('Enrolled successfully! (Group connection pending)');
+          }
+        } catch (groupError) {
+          console.error('❌ Error connecting to group:', groupError);
+          // Don't fail the entire enrollment if group connection fails
+          toast.success('Enrolled successfully! (Unable to connect to group at this time)');
+        }
+      } else {
+        console.log('ℹ️ No group associated with this course');
+        toast.success('Enrolled successfully!');
+      }
+
       return true;
     } catch (err: any) {
       console.error('❌ Enrollment error:', err);
