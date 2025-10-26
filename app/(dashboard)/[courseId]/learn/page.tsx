@@ -685,7 +685,7 @@ function CourseLearnPageContent() {
             Please sign in to access course content.
           </p>
           <Link
-            href="/auth/login"
+            href="/login"
             className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
           >
             Sign In

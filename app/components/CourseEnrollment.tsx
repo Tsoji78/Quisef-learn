@@ -87,7 +87,7 @@ const CourseEnrollment = memo(({
       const learnUrl = `/${course.id}/learn/${moduleId}`;
       
       console.log('✅ Navigating to:', learnUrl);
-      router.push(learnUrl);
+      router.push('/${course.id}/learn/${moduleId}');
     } else {
       // No modules available, redirect to courses list
       console.warn('⚠️ No modules found, redirecting to courses');
