@@ -20,6 +20,21 @@ export class GroupService {
     return members.map(member => member.id);
   }
 
+  // Helper function to check if user is a member (supports both old and new data structures)
+  private static isMember(groupData: any, userId: string): boolean {
+    // First check memberIds array (new structure)
+    if (groupData.memberIds && Array.isArray(groupData.memberIds)) {
+      return groupData.memberIds.includes(userId);
+    }
+    
+    // Fall back to members array (old structure)
+    if (groupData.members && Array.isArray(groupData.members)) {
+      return groupData.members.some((m: Member) => m.id === userId);
+    }
+    
+    return false;
+  }
+
   static async editMemberRole(
     groupId: string,
     memberId: string,
@@ -124,11 +139,14 @@ export class GroupService {
       }
 
       const groupData = groupSnap.data();
-      const memberIds = groupData.memberIds || [];
       
-      if (!memberIds.includes(userId)) {
+      // Check membership using helper function (supports both old and new structures)
+      if (!this.isMember(groupData, userId)) {
         throw new Error('User is not a member of this group.');
       }
+
+      // Get member count for forum creation
+      const memberCount = groupData.memberIds?.length || groupData.members?.length || 0;
 
       // Ensure default forum exists
       const defaultForumRef = doc(db, 'groups', groupId, 'chatForums', 'default');
@@ -138,7 +156,7 @@ export class GroupService {
           id: 'default',
           title: 'General Discussion',
           description: 'General discussion for the group',
-          memberCount: memberIds.length,
+          memberCount: memberCount,
           lastMessageAt: serverTimestamp() 
         });
       }
@@ -190,6 +208,25 @@ export class GroupService {
       }
     } catch (error) {
       console.error(`Error syncing memberIds for group ${groupId}:`, error);
+    }
+  }
+
+  // Utility method to sync all groups at once (run once to migrate existing data)
+  static async syncAllGroupMemberIds() {
+    try {
+      const { collection: firestoreCollection, getDocs } = await import('firebase/firestore');
+      const groupsSnapshot = await getDocs(firestoreCollection(db, 'groups'));
+      
+      const syncPromises = groupsSnapshot.docs.map(doc => 
+        this.syncGroupMemberIds(doc.id)
+      );
+      
+      await Promise.all(syncPromises);
+      console.log('All groups synced with memberIds');
+      toast.success('All groups synced successfully!');
+    } catch (error) {
+      console.error('Error syncing all groups:', error);
+      toast.error('Failed to sync groups');
     }
   }
 }
