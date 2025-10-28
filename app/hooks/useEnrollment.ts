@@ -85,6 +85,18 @@ export function useEnrollment(courseId: string, userId: string | null) {
           const groupSnap = await getDoc(groupRef);
 
           if (groupSnap.exists()) {
+            const groupData = groupSnap.data();
+            
+            // Check if user is already a member
+            const existingMembers = groupData.members || [];
+            const isMember = existingMembers.some((m: any) => m.id === userId);
+            
+            if (isMember) {
+              console.log('ℹ️ User already in group');
+              toast.success('Enrolled successfully!');
+              return true;
+            }
+
             // Prepare member data
             const newMember = {
               id: userId,
@@ -94,9 +106,13 @@ export function useEnrollment(courseId: string, userId: string | null) {
               profileImage: userData?.photoURL || userData?.profileImage || '',
             };
 
-            // Add user to group members array
+            // Add user to both members array AND memberIds array
+            const updatedMembers = [...existingMembers, newMember];
+            const updatedMemberIds = updatedMembers.map(m => m.id);
+
             await updateDoc(groupRef, {
-              members: arrayUnion(newMember),
+              members: updatedMembers,
+              memberIds: updatedMemberIds,
               updatedAt: serverTimestamp(),
             });
 
