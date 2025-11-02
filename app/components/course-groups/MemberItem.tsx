@@ -47,12 +47,6 @@ export const MemberItem = React.memo<MemberItemProps>(({ member, groupId, onRole
         <option value="Instructor">Instructor</option>
         <option value="Teaching Assistant">Teaching Assistant</option>
       </select>
-      <button
-        onClick={() => onRemove(groupId, member.id)}
-        className="text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/20 p-2 rounded-full transition-colors"
-      >
-        <Trash2 size={18} />
-      </button>
     </div>
   </div>
 ));

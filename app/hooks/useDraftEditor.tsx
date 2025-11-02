@@ -366,14 +366,7 @@ export const useDraftEditor = (
       if (!file) {
         const input = document.createElement('input');
         input.setAttribute('type', 'file');
-        // Use file extensions instead of MIME types for file picker
-        const extensionMap = {
-          image: '.jpg,.jpeg,.png,.webp',
-          video: '.mp4,.webm,.mov,.avi',
-          gif: '.gif',
-          sticker: '.png,.webp,.svg'
-        };
-        input.setAttribute('accept', extensionMap[mediaType]);
+        input.setAttribute('accept', config.accept);
         input.onchange = async () => {
           const selectedFile = input.files?.[0];
           if (selectedFile) {
@@ -404,25 +397,29 @@ export const useDraftEditor = (
 
       // Enhanced file type validation
       const isValidFileType = () => {
-        const acceptedTypes = config.accept.split(',').map(type => type.trim());
         const fileName = file.name.toLowerCase();
         
-        // Check MIME type first
-        if (acceptedTypes.some(type => file.type === type)) {
-          return true;
+        // Check by media type category with both MIME type and extension fallback
+        if (mediaType === 'image') {
+          return file.type.startsWith('image/') && !file.type.includes('gif') || 
+                 /\.(jpg|jpeg|png|webp)$/i.test(fileName);
         }
         
-        // Fallback to file extension for problematic MIME types
         if (mediaType === 'video') {
-          return fileName.endsWith('.mp4') || 
-                fileName.endsWith('.webm') || 
-                fileName.endsWith('.mov') ||
-                fileName.endsWith('.avi') ||
-                file.type.startsWith('video/');
+          return file.type.startsWith('video/') || 
+                 /\.(mp4|webm|mov|avi)$/i.test(fileName);
         }
         
-        // For other types, use MIME type matching
-        return acceptedTypes.some(type => file.type.startsWith(type.split('/')[0] + '/'));
+        if (mediaType === 'gif') {
+          return file.type === 'image/gif' || fileName.endsWith('.gif');
+        }
+        
+        if (mediaType === 'sticker') {
+          return ['image/png', 'image/webp', 'image/svg+xml'].includes(file.type) ||
+                 /\.(png|webp|svg)$/i.test(fileName);
+        }
+        
+        return false;
       };
 
       if (!isValidFileType()) {
