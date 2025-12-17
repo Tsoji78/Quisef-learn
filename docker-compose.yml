@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # Firebase Config
+      - NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyD1gMD_INqDjEOHTqr23oE6QRysCi72oWk
+      - NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=quisef-lms.firebaseapp.com
+      - NEXT_PUBLIC_FIREBASE_PROJECT_ID=quisef-lms
+      - NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=quisef-lms.firebasestorage.app
+      - NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=100749347667
+      - NEXT_PUBLIC_FIREBASE_APP_ID=1:100749347667:web:a7cf545b56e44b2656afa6
+      - NEXT_PUBLIC_FIREBASE_MEASURING_ID=G-HEMS3RCLVB
+      # Cloudinary Config
+      - NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=dyl8jpo9a
+      - NEXT_PUBLIC_CLOUDINARY_API_KEY=172445284144864
+      - NEXT_PUBLIC_CLOUDINARY_UPLOCLOUDINARY_API_SECRET=BBgVgXTnMs4W_X5fxpSeFPYbPhY
+      - NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET=ml_default
+
+    restart: unless-stopped
